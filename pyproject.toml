@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "carsim"
+version = "0.12.0"
+description = "Analysis-first race car simulator: tyres, aero, tyre temperature and wear, track evolution, weather, fuel and a racing-line driver"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = ["numpy>=1.24", "scipy>=1.10", "matplotlib>=3.7"]
+
+[project.optional-dependencies]
+play = ["pygame>=2.5"]
+dev = ["pytest>=7"]
+
+[tool.setuptools]
+packages = ["carsim"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
