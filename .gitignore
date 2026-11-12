@@ -12,3 +12,6 @@ venv/
 /out/
 *.html
 !docs/**/*.html
+
+# trained AI drivers (checkpoints)
+ai_runs/

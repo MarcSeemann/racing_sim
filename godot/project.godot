@@ -1,0 +1,23 @@
+; Engine configuration file.
+; carsim 3D front end: the physics runs in Python (python -m carsim.server); this project draws it.
+
+config_version=5
+
+[application]
+
+config/name="carsim 3D"
+config/description="3D view and controls for the carsim Python physics server"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.3", "GL Compatibility")
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/aspect="expand"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+anti_aliasing/quality/msaa_3d=2

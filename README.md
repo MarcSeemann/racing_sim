@@ -7,6 +7,8 @@ line are all modelled and can be switched on, changed and compared.
 
 ![Racing line vs centreline](docs/images/driver_report.png)
 
+![3D view in the rain](docs/images/3d_rain.png)
+
 ## What it simulates
 
 | Area | What's in it |
@@ -39,6 +41,58 @@ line are all modelled and can be switched on, changed and compared.
     python -m carsim compare --change car.chassis.mass=+40 --name "+40 kg" --out compare.html
     python play.py                                           # drive it yourself (arrows/WASD)
     python play.py --demo --track hill --weather shower      # watch the AI in a shower
+
+## Drive it in 3D (Godot)
+
+The physics stays in Python; [Godot](https://godotengine.org/download) (4.3 or newer) draws the
+car and the track and reads your keyboard or gamepad.
+
+    python drive3d.py                                  # you drive: test circuit, dry
+    python drive3d.py --track hill --weather shower --compound intermediate
+    python drive3d.py --ai                             # watch the AI on the racing line
+
+`drive3d.py` starts the physics server and Godot together. Put Godot on your PATH as `godot`,
+or set `GODOT=/path/to/godot`. Or run the two halves yourself: `python -m carsim.server` in one
+terminal, then open `godot/project.godot` in the Godot editor and press F5.
+
+| Control | Keyboard | Gamepad |
+| --- | --- | --- |
+| Steer | A / D or arrows | left stick |
+| Throttle / brake | W / S or arrows | right / left trigger |
+| Shift up / down | E / Q | RB / LB (or A / B) |
+| DRS | R | Y |
+| Back on track | Backspace | Back |
+| Camera: chase, cockpit, TV | C | X |
+| Racing line on/off · restart · quit | L · F5 · Esc | |
+
+| | |
+| --- | --- |
+| ![Hairpin](docs/images/3d_hairpin.png) | ![TV camera](docs/images/3d_tv.png) |
+
+How it fits together: `carsim/server.py` runs the simulation at 1 kHz, paced to real time, and
+streams the car's state to Godot about 60 times a second over a local TCP connection
+(newline-delimited JSON); Godot sends the controls back. The track mesh, kerbs and grass are built
+from the same centreline the physics uses, so hills and corners match exactly.
+
+## An AI that teaches itself to drive
+
+`carsim/learn.py` trains a small neural-network driver from scratch with evolution strategies
+(numpy only, no deep-learning library). It sees what a driver feels and sees (speed, sliding,
+position across the track, how the road curves ahead) and outputs steering and one pedal.
+It starts out knowing nothing and gets better every generation: each round it tries many slightly
+varied versions of itself from random places on the lap and keeps whatever gets further
+without leaving the track.
+
+    python -m carsim.learn train --track short                     # uses all CPU cores; Ctrl+C any time
+    nohup python -m carsim.learn train --track test --hours 4 > train.log 2>&1 &   # in the background
+    python -m carsim.learn status --track short                    # progress so far
+    python -m carsim.learn drive --track short                     # one lap with the best driver so far
+    python drive3d.py --track short --learned                      # watch it in 3D
+
+Training saves after every generation to `ai_runs/<track>/` and resumes where it stopped. The 3D
+view reloads the newest saved driver at the end of each lap, so you can watch it improve while it
+trains. Expect the first laps after a few hundred generations: the hairpin is the first big wall
+(it has to discover braking), then it gets faster lap by lap.
 
 `python -m carsim presets` lists the ready-made studies: hot-day, downforce, balance, weight,
 tyres and track. Changes are `path=value`, `path=+delta` or `path=*factor`, where the path starts
@@ -114,9 +168,13 @@ More reports (each made by a script in `analysis/`):
       viewer.py        interactive HTML lap viewer
       sim.py           1 kHz simulation loop; telemetry.py: per-step log
       __main__.py      command line (python -m carsim)
-    play.py            real-time playable view (pygame)
+    carsim/learn.py    self-taught AI driver (evolution strategies), training and checkpoints
+    carsim/server.py   real-time physics server for the 3D front end
+    drive3d.py         starts the server and Godot together
+    godot/             Godot 4 project: 3D track, car, cameras, HUD, rain (main.gd)
+    play.py            real-time top-down view (pygame)
     analysis/          report scripts (PNG charts)
-    tests/             91 tests, each checking a known answer (~8 min)
+    tests/             99 tests, each checking a known answer (~8 min)
 
 ## Tests
 
@@ -136,9 +194,11 @@ input replay and more. GitHub Actions runs them on every push (`.github/workflow
 | 8 Track evolution and elevation · 9 Weather and wet tyres | done |
 | 10 Fuel and mass · 11 Racing line and live driver input | done |
 | 12 What-if studies, lap viewer, playable view | done |
+| 3D front end in Godot (physics in Python) | first version |
 
-Ideas for what's next: pit stops and race strategy, suspension pitch and roll dynamics (porpoising),
-a minimum-lap-time racing line, multiple cars and slipstream, a 3D view.
+Ideas for what's next: a better car model and sound in 3D, force feedback for steering wheels, pit stops
+and race strategy, suspension pitch and roll dynamics (porpoising), a minimum-lap-time racing line,
+multiple cars and slipstream.
 
 ## Known simplifications
 
@@ -150,6 +210,8 @@ a minimum-lap-time racing line, multiple cars and slipstream, a 3D view.
 - Wind blows from one direction for the whole lap (a headwind on one straight is a tailwind on the other).
 - Default cars carry no fuel; `race_car()` sets a 798 kg car plus fuel.
 - No pit stops or tyre changes mid-run.
+- The 3D car is built from simple shapes, there is no sound yet, and the body's roll is a visual
+  approximation (the physics has no roll motion).
 
 ## Licence
 
