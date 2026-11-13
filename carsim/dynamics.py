@@ -127,6 +127,19 @@ class Car2D:
         s.vx = v
         s.w = [v / r] * 4
 
+    def place(self, track, s: float = 0.0, offset: float = 0.0):
+        """Put the car on a track at distance s along it, `offset` m left of the centreline (or of
+        the line given as `track`), pointing along it. Made-up circuits start at the origin
+        heading east (where a new car already is); real ones do not."""
+        i = track.index_at(s)
+        h = float(track.heading[i])
+        st = self.state
+        st.x = float(track.x[i]) - offset * math.sin(h)
+        st.y = float(track.y[i]) + offset * math.cos(h)
+        st.psi = h
+        if getattr(self, "cond", None) is not None:
+            self.cond.i = self.cond.track.index_at(s)
+
     def wheel_rpm_to_engine(self, v: float, gear: int) -> float:
         return v / self.p.chassis.wheel_radius * overall_ratio(self.p.gearbox, gear) / RPM_TO_RADS
 

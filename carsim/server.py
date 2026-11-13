@@ -12,6 +12,7 @@ over TCP on localhost and exchanges newline-delimited JSON:
 
     python -m carsim.server --track test --weather shower --compound intermediate
     python -m carsim.server --ai            # the AI drives; the client just watches
+    python -m carsim.server --track monza --learned --policy random   # the all-rounder at Monza
 
 Coordinates are the simulation's: x east, y north, z up (metres); yaw in radians,
 anticlockwise from +x. The client converts to its own axes.
@@ -28,13 +29,11 @@ from .conditions import Conditions, Weather
 from .drivers import LapDriver
 from .dynamics import Car2D
 from .inputs import DeviceState, HumanDriver
+from .circuits import TRACKS, track_arg
 from .params import race_car
-from .track import hill_circuit, short_circuit
-from .track import test_circuit as long_circuit
 
 DT = 0.001
 SEND_HZ = 60.0
-TRACKS = {"short": short_circuit, "test": long_circuit, "hill": hill_circuit}
 WEATHER = {"dry": lambda: Weather.dry(),
            "shower": lambda: Weather.shower(start=60, peak=180, end=360, rain_mm_h=8.0),
            "wet": lambda: Weather.constant(rain_mm_h=6.0, cloud=1.0, air_temp_c=16.0)}
@@ -43,8 +42,10 @@ WEATHER = {"dry": lambda: Weather.dry(),
 class Session:
     """One car on one track, driven by a player (inputs from the client) or the AI."""
 
-    def __init__(self, track="test", weather="dry", compound="slick", fuel=40.0, ai=False, learned=False):
+    def __init__(self, track="test", weather="dry", compound="slick", fuel=40.0, ai=False, learned=False,
+                 policy=None):
         self.track_name = track
+        self.policy_name = policy or track  # whose trained driver: its training run (e.g. "random")
         self.learned = learned  # drive with the self-taught network (carsim.learn) instead of LapDriver
         self.track = TRACKS[track]()
         self.weather_name, self.compound, self.fuel, self.ai = weather, compound, fuel, ai
@@ -58,9 +59,10 @@ class Session:
             self.car = Car2D(race_car(self.fuel), conditions=self.cond, compound=self.compound)
             self.car.set_speed(20.0 if self.ai else 0.0)  # you start from a standstill
             self.ai_driver = LapDriver(self.track, line=(self.ai_driver.path, self.ai_driver.offsets))
+            self.car.place(self.ai_driver.path)  # on the line at the start (real circuits are not at the origin)
             if self.learned:
                 from .learn import LearnedDriver
-                self.driver = LearnedDriver(self.track, self.track_name)
+                self.driver = LearnedDriver(self.track, self.policy_name)
             else:
                 self.driver = self.ai_driver if self.ai else HumanDriver(lambda t: self.device)
             self.live = LiveDelta(self.track)
@@ -103,6 +105,7 @@ class Session:
         tr, line = self.track, self.ai_driver.path
         r = lambda a: [round(float(v), 2) for v in a]
         return {"type": "track", "name": tr.name, "width": tr.width, "kerb": tr.kerb_width,
+                "width_left": r(tr.width_left), "width_right": r(tr.width_right),
                 "x": r(tr.x), "y": r(tr.y), "z": r(tr.z), "heading": [round(float(v), 4) for v in tr.heading],
                 "line_x": r(line.x), "line_y": r(line.y),
                 "wheelbase": self.car.p.chassis.wheelbase, "track_front": self.car.p.chassis.track_front,
@@ -227,16 +230,18 @@ def _run_client(session, conn, max_seconds=None):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--track", choices=TRACKS, default="test")
+    ap.add_argument("--track", type=track_arg, default="test", help="short, test, hill, monza or random:<seed>")
     ap.add_argument("--weather", choices=WEATHER, default="dry")
     ap.add_argument("--compound", choices=("slick", "intermediate", "wet"), default="slick")
     ap.add_argument("--fuel", type=float, default=40.0)
     ap.add_argument("--ai", action="store_true", help="the AI drives (watch mode)")
     ap.add_argument("--learned", action="store_true",
                     help="the self-taught driver drives (python -m carsim.learn train ...); reloads as it improves")
+    ap.add_argument("--policy", default=None,
+                    help="with --learned: whose driver, e.g. random for the one trained on random circuits")
     ap.add_argument("--port", type=int, default=4545)
     a = ap.parse_args(argv)
-    serve(Session(a.track, a.weather, a.compound, a.fuel, a.ai, a.learned), port=a.port)
+    serve(Session(a.track, a.weather, a.compound, a.fuel, a.ai, a.learned, a.policy), port=a.port)
 
 
 if __name__ == "__main__":

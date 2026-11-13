@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "carsim"
-version = "0.12.0"
+version = "0.13.0"
 description = "Analysis-first race car simulator: tyres, aero, tyre temperature and wear, track evolution, weather, fuel and a racing-line driver"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -18,6 +18,9 @@ dev = ["pytest>=7"]
 
 [tool.setuptools]
 packages = ["carsim"]
+
+[tool.setuptools.package-data]
+carsim = ["data/tracks/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

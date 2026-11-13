@@ -5,6 +5,10 @@ elevation, grade and vertical curvature against distance s along the lap.
 Build one from straights and arcs (`from_segments`), from surveyed points
 (`from_points`, `from_csv` — e.g. a real circuit's x, y, z), and add elevation
 with `with_elevation`.
+
+Width can vary round the lap: `width_left` / `width_right` are the distances (m) from
+the centreline to the left and right track edges at every sample (real circuits are
+rarely symmetric about their surveyed centreline). `width` is the nominal (mean) width.
 """
 import math
 from dataclasses import dataclass
@@ -26,10 +30,22 @@ class Track:
     grade: np.ndarray | None = None  # slope dz/ds (rad, small-angle), positive = uphill
     vert_curv: np.ndarray | None = None  # d(grade)/ds, 1/m: positive = dip (compression), negative = crest
     kerb_width: float = 1.5  # m of kerb outside each track edge
+    width_left: np.ndarray | None = None  # m from the centreline to the left edge, per sample
+    width_right: np.ndarray | None = None  # m from the centreline to the right edge, per sample
 
     def __post_init__(self):
         if self.z is None:
             self.z = np.zeros_like(self.s)
+        n = len(self.s)
+        if self.width_left is None and self.width_right is None:
+            self.width_left = np.full(n, self.width / 2)
+            self.width_right = np.full(n, self.width / 2)
+        else:
+            wl = self.width_left if self.width_left is not None else self.width_right
+            wr = self.width_right if self.width_right is not None else self.width_left
+            self.width_left = np.broadcast_to(np.asarray(wl, float), (n,)).copy()
+            self.width_right = np.broadcast_to(np.asarray(wr, float), (n,)).copy()
+            self.width = float(np.mean(self.width_left + self.width_right))
         if self.grade is None or self.vert_curv is None:
             self._derive_vertical()
 
@@ -50,28 +66,38 @@ class Track:
         """Copy of this track with elevation z(s) (m). z_of_s must return to its start value."""
         z = np.array([z_of_s(v) for v in self.s])
         return Track(name or self.name, self.s, self.x, self.y, self.heading, self.curvature,
-                     self.length, self.width, z, kerb_width=self.kerb_width)
+                     self.length, self.width, z, kerb_width=self.kerb_width,
+                     width_left=self.width_left, width_right=self.width_right)
 
     @classmethod
-    def from_points(cls, name: str, x, y, z=None, width: float = 12.0, ds: float = 1.0, smooth: int = 7):
+    def from_points(cls, name: str, x, y, z=None, width: float = 12.0, ds: float = 1.0, smooth: int = 7,
+                    width_left=None, width_right=None, kerb_width: float = 1.5):
         """Closed track through surveyed centreline points (the loop closes from last to first).
 
         Points are resampled every `ds` m along the polyline, then heading and curvature are
         taken from a lightly smoothed (moving average over `smooth` samples) centreline.
+        `width_left` / `width_right` (m, one per point) give a varying width; otherwise the
+        track is `width` wide everywhere.
         """
         x, y = np.asarray(x, float), np.asarray(y, float)
         z = np.zeros_like(x) if z is None else np.asarray(z, float)
-        xc, yc, zc = np.append(x, x[0]), np.append(y, y[0]), np.append(z, z[0])
+        varying = width_left is not None or width_right is not None
+        wl = np.broadcast_to(np.asarray(width_left if width_left is not None else width_right, float), x.shape) \
+            if varying else np.full_like(x, width / 2)
+        wr = np.broadcast_to(np.asarray(width_right if width_right is not None else width_left, float), x.shape) \
+            if varying else np.full_like(x, width / 2)
+        close = lambda a: np.append(a, a[0])
+        xc, yc, zc, wlc, wrc = (close(a) for a in (x, y, z, wl, wr))
         seg = np.hypot(np.diff(xc), np.diff(yc))
         sc = np.concatenate([[0.0], np.cumsum(seg)])
         length = float(sc[-1])
         n = int(round(length / ds))
         s = np.linspace(0.0, length, n, endpoint=False)
-        xs, ys, zs = (np.interp(s, sc, a) for a in (xc, yc, zc))
+        xs, ys, zs, wls, wrs = (np.interp(s, sc, a) for a in (xc, yc, zc, wlc, wrc))
         if smooth > 1:
             k = np.ones(smooth) / smooth
             wrap = lambda a: np.convolve(np.concatenate([a[-smooth:], a, a[:smooth]]), k, "same")[smooth:-smooth]
-            xs, ys, zs = wrap(xs), wrap(ys), wrap(zs)
+            xs, ys, zs, wls, wrs = wrap(xs), wrap(ys), wrap(zs), wrap(wls), wrap(wrs)
         dx, dy = np.gradient(xs), np.gradient(ys)
         dx[0], dy[0] = (xs[1] - xs[-1]) / 2, (ys[1] - ys[-1]) / 2
         dx[-1], dy[-1] = (xs[0] - xs[-2]) / 2, (ys[0] - ys[-2]) / 2
@@ -80,10 +106,13 @@ class Track:
         dh[0] = math.remainder(heading[1] - heading[-1], 2 * math.pi) / 2
         dh[-1] = math.remainder(heading[0] - heading[-2], 2 * math.pi) / 2
         curvature = dh / np.hypot(dx, dy)
-        return cls(name, s, xs, ys, heading, curvature, length, width, zs)
+        if not varying:
+            return cls(name, s, xs, ys, heading, curvature, length, width, zs, kerb_width=kerb_width)
+        return cls(name, s, xs, ys, heading, curvature, length, width, zs, kerb_width=kerb_width,
+                   width_left=wls, width_right=wrs)
 
     @classmethod
-    def from_samples(cls, name: str, x, y, z=None, width: float = 12.0):
+    def from_samples(cls, name: str, x, y, z=None, width: float = 12.0, width_left=None, width_right=None):
         """Closed track through already-dense samples, keeping one sample per input point
         (used for racing lines, so line index i matches centreline index i)."""
         x, y = np.asarray(x, float), np.asarray(y, float)
@@ -95,14 +124,17 @@ class Track:
         heading = np.unwrap(np.arctan2(dy, dx))
         dh = np.array([math.remainder(a, 2 * math.pi) for a in (np.roll(heading, -1) - np.roll(heading, 1)) / 1.0]) / 2
         curvature = dh / np.maximum(np.hypot(dx, dy), 1e-9)
-        return cls(name, s, x, y, heading, curvature, float(seg.sum()), width, z)
+        return cls(name, s, x, y, heading, curvature, float(seg.sum()), width, z,
+                   width_left=width_left, width_right=width_right)
 
     @classmethod
     def from_csv(cls, path: str, name: str | None = None, width: float = 12.0):
-        """Load a centreline from a CSV with columns x, y and optionally z (metres, header row)."""
+        """Load a centreline from a CSV with columns x, y and optionally z, width_left and
+        width_right (metres, header row)."""
         data = np.genfromtxt(path, delimiter=",", names=True)
-        z = data["z"] if "z" in data.dtype.names else None
-        return cls.from_points(name or path, data["x"], data["y"], z, width)
+        col = lambda k: data[k] if k in data.dtype.names else None
+        return cls.from_points(name or path, data["x"], data["y"], col("z"), width,
+                               width_left=col("width_left"), width_right=col("width_right"))
 
     @classmethod
     def from_segments(cls, name: str, segments, ds: float = 1.0, width: float = 12.0):
@@ -136,12 +168,29 @@ class Track:
     def lateral_offset(self, i: int, x: float, y: float) -> float:
         return self.cross_track_error(i, x, y)
 
-    def surface_at(self, offset: float) -> str:
-        """'track', 'kerb' or 'grass' for a lateral offset from the centreline (m)."""
-        edge = self.width / 2
-        if abs(offset) <= edge:
+    def edges(self, i: int) -> tuple[float, float]:
+        """(left, right) distances (m) from the centreline to the track edges at index i."""
+        return float(self.width_left[i]), float(self.width_right[i])
+
+    def edge_beyond(self, i: int, offset: float) -> float:
+        """How far (m) a lateral offset is outside the track edge at index i (negative = inside)."""
+        return offset - self.width_left[i] if offset >= 0 else -offset - self.width_right[i]
+
+    def off_track(self, i: int, offset: float, margin: float = 0.0) -> bool:
+        return self.edge_beyond(i, offset) > margin
+
+    def normalised_offset(self, i: int, offset: float) -> float:
+        """Position across the track: -1 = right edge, 0 = middle of the tarmac, +1 = left edge."""
+        wl, wr = self.width_left[i], self.width_right[i]
+        return (offset - (wl - wr) / 2) / ((wl + wr) / 2)
+
+    def surface_at(self, offset: float, i: int | None = None) -> str:
+        """'track', 'kerb' or 'grass' for a lateral offset from the centreline (m), at index i
+        (without i: the nominal, symmetric width)."""
+        out = self.edge_beyond(i, offset) if i is not None else abs(offset) - self.width / 2
+        if out <= 0:
             return "track"
-        if abs(offset) <= edge + self.kerb_width:
+        if out <= self.kerb_width:
             return "kerb"
         return "grass"
 

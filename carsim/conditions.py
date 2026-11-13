@@ -165,8 +165,9 @@ class Conditions:
     def wheel_surface(self, s_wheel: float, offset: float, compound: Compound, speed: float):
         """(grip factor, water depth mm, surface name) for a wheel at s along the lap, lateral offset."""
         b = self.bin_of(s_wheel)
-        surf = self.track.surface_at(offset)
-        on_line = abs(offset - self.line_offset[self.track.index_at(s_wheel)]) <= self.sp.line_width
+        iw = self.track.index_at(s_wheel)
+        surf = self.track.surface_at(offset, iw)
+        on_line = abs(offset - self.line_offset[iw]) <= self.sp.line_width
         depth = self.water[b] if on_line else max(self.water[b], self._off_line)
         grip = wet_grip(compound, depth, speed)
         if surf == "track":
