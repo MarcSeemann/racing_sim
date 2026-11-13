@@ -1,0 +1,240 @@
+nohup: ignoring input
+training a driver for the short circuit with 8 workers; checkpoints in ai_runs/short/
+resuming short from generation 83 (best fitness 3712)
+gen   84  practice mean    303 best    403  |  test drive: lap 43.92 s  |  best ever 3766   13.0 min
+gen   85  practice mean    349 best    443  |  test drive: 353 m then off track  |  best ever 3766   14.0 min
+gen   86  practice mean    373 best    456  |  test drive: 341 m then off track  |  best ever 3766   14.9 min
+gen   87  practice mean    408 best    514  |  test drive: 911 m then off track  |  best ever 3766   15.9 min
+gen   88  practice mean    372 best    491  |  test drive: lap 46.10 s  |  best ever 3766   16.8 min
+gen   89  practice mean    401 best    491  |  test drive: lap 42.64 s  |  best ever 3830   17.8 min
+gen   90  practice mean    388 best    460  |  test drive: 925 m then off track  |  best ever 3830   18.7 min
+gen   91  practice mean    377 best    468  |  test drive: 906 m then off track  |  best ever 3830   19.6 min
+gen   92  practice mean    345 best    444  |  test drive: lap 41.78 s  |  best ever 3873   20.5 min
+gen   93  practice mean    336 best    479  |  test drive: lap 44.58 s  |  best ever 3873   21.4 min
+gen   94  practice mean    385 best    496  |  test drive: lap 44.22 s  |  best ever 3873   22.4 min
+gen   95  practice mean    348 best    448  |  test drive: lap 44.04 s  |  best ever 3873   23.3 min
+gen   96  practice mean    369 best    490  |  test drive: lap 40.56 s  |  best ever 3934   24.3 min
+gen   97  practice mean    383 best    478  |  test drive: lap 40.32 s  |  best ever 3946   25.2 min
+gen   98  practice mean    375 best    489  |  test drive: lap 37.46 s  |  best ever 4089   26.1 min
+gen   99  practice mean    347 best    505  |  test drive: 292 m then off track  |  best ever 4089   27.0 min
+gen  100  practice mean    457 best    548  |  test drive: 529 m then off track  |  best ever 4089   27.9 min
+gen  101  practice mean    402 best    471  |  test drive: 557 m then off track  |  best ever 4089   28.8 min
+gen  102  practice mean    428 best    531  |  test drive: 553 m then off track  |  best ever 4089   29.7 min
+gen  103  practice mean    292 best    398  |  test drive: 548 m then off track  |  best ever 4089   30.4 min
+gen  104  practice mean    425 best    543  |  test drive: lap 38.26 s  |  best ever 4089   31.3 min
+gen  105  practice mean    397 best    539  |  test drive: 542 m then off track  |  best ever 4089   32.2 min
+gen  106  practice mean    370 best    509  |  test drive: lap 38.82 s  |  best ever 4089   33.1 min
+gen  107  practice mean    407 best    528  |  test drive: 545 m then off track  |  best ever 4089   34.0 min
+gen  108  practice mean    367 best    511  |  test drive: lap 38.76 s  |  best ever 4089   34.9 min
+gen  109  practice mean    336 best    423  |  test drive: lap 39.30 s  |  best ever 4089   35.8 min
+gen  110  practice mean    429 best    494  |  test drive: lap 41.24 s  |  best ever 4089   36.8 min
+gen  111  practice mean    397 best    468  |  test drive: lap 40.34 s  |  best ever 4089   37.8 min
+gen  112  practice mean    376 best    511  |  test drive: 559 m then off track  |  best ever 4089   38.7 min
+gen  113  practice mean    452 best    530  |  test drive: lap 38.50 s  |  best ever 4089   39.7 min
+gen  114  practice mean    417 best    532  |  test drive: 536 m then off track  |  best ever 4089   40.6 min
+gen  115  practice mean    366 best    446  |  test drive: lap 38.22 s  |  best ever 4089   41.5 min
+gen  116  practice mean    386 best    504  |  test drive: 546 m then off track  |  best ever 4089   42.3 min
+gen  117  practice mean    363 best    533  |  test drive: 340 m then off track  |  best ever 4089   43.1 min
+gen  118  practice mean    429 best    521  |  test drive: 885 m then off track  |  best ever 4089   44.0 min
+gen  119  practice mean    299 best    413  |  test drive: 330 m then off track  |  best ever 4089   44.7 min
+gen  120  practice mean    414 best    548  |  test drive: 897 m then off track  |  best ever 4089   45.6 min
+gen  121  practice mean    362 best    512  |  test drive: 901 m then off track  |  best ever 4089   46.4 min
+gen  122  practice mean    392 best    507  |  test drive: lap 36.86 s  |  best ever 4119   47.3 min
+gen  123  practice mean    396 best    495  |  test drive: lap 38.40 s  |  best ever 4119   48.2 min
+gen  124  practice mean    414 best    523  |  test drive: 558 m then off track  |  best ever 4119   49.2 min
+gen  125  practice mean    419 best    494  |  test drive: lap 39.94 s  |  best ever 4119   50.2 min
+gen  126  practice mean    417 best    531  |  test drive: lap 40.24 s  |  best ever 4119   51.1 min
+gen  127  practice mean    422 best    529  |  test drive: lap 39.88 s  |  best ever 4119   52.1 min
+gen  128  practice mean    410 best    531  |  test drive: 1130 m then off track  |  best ever 4119   53.0 min
+gen  129  practice mean    383 best    477  |  test drive: lap 39.34 s  |  best ever 4119   54.0 min
+gen  130  practice mean    461 best    564  |  test drive: lap 39.56 s  |  best ever 4119   55.0 min
+gen  131  practice mean    379 best    521  |  test drive: 330 m then off track  |  best ever 4119   55.8 min
+gen  132  practice mean    341 best    494  |  test drive: lap 40.48 s  |  best ever 4119   56.6 min
+gen  133  practice mean    347 best    481  |  test drive: 561 m then off track  |  best ever 4119   57.5 min
+gen  134  practice mean    406 best    547  |  test drive: 342 m then off track  |  best ever 4119   58.4 min
+gen  135  practice mean    310 best    404  |  test drive: 331 m then off track  |  best ever 4119   59.0 min
+gen  136  practice mean    428 best    551  |  test drive: lap 37.68 s  |  best ever 4119   60.0 min
+gen  137  practice mean    364 best    493  |  test drive: lap 39.46 s  |  best ever 4119   60.8 min
+gen  138  practice mean    340 best    435  |  test drive: lap 40.08 s  |  best ever 4119   61.7 min
+gen  139  practice mean    330 best    416  |  test drive: lap 41.52 s  |  best ever 4119   62.5 min
+gen  140  practice mean    426 best    489  |  test drive: lap 42.18 s  |  best ever 4119   63.5 min
+gen  141  practice mean    432 best    538  |  test drive: lap 41.30 s  |  best ever 4119   64.6 min
+gen  142  practice mean    426 best    489  |  test drive: lap 41.12 s  |  best ever 4119   65.5 min
+gen  143  practice mean    440 best    564  |  test drive: lap 39.62 s  |  best ever 4119   66.5 min
+gen  144  practice mean    450 best    536  |  test drive: lap 39.86 s  |  best ever 4119   67.5 min
+gen  145  practice mean    332 best    418  |  test drive: 892 m then off track  |  best ever 4119   68.2 min
+gen  146  practice mean    424 best    529  |  test drive: 527 m then off track  |  best ever 4119   69.1 min
+gen  147  practice mean    326 best    539  |  test drive: 526 m then off track  |  best ever 4119   69.8 min
+gen  148  practice mean    279 best    419  |  test drive: 893 m then off track  |  best ever 4119   70.4 min
+gen  149  practice mean    443 best    563  |  test drive: 895 m then off track  |  best ever 4119   71.3 min
+gen  150  practice mean    411 best    522  |  test drive: 927 m then off track  |  best ever 4119   72.3 min
+gen  151  practice mean    310 best    420  |  test drive: 922 m then off track  |  best ever 4119   73.1 min
+gen  152  practice mean    395 best    495  |  test drive: lap 39.06 s  |  best ever 4119   74.0 min
+gen  153  practice mean    396 best    536  |  test drive: lap 38.72 s  |  best ever 4119   74.9 min
+gen  154  practice mean    448 best    531  |  test drive: lap 40.50 s  |  best ever 4119   76.0 min
+gen  155  practice mean    450 best    546  |  test drive: 930 m then off track  |  best ever 4119   77.0 min
+gen  156  practice mean    425 best    527  |  test drive: lap 35.90 s  |  best ever 4167   78.0 min
+gen  157  practice mean    390 best    540  |  test drive: 926 m then off track  |  best ever 4167   78.9 min
+gen  158  practice mean    391 best    532  |  test drive: 899 m then off track  |  best ever 4167   79.7 min
+gen  159  practice mean    428 best    553  |  test drive: 911 m then off track  |  best ever 4167   80.6 min
+gen  160  practice mean    402 best    545  |  test drive: 885 m then off track  |  best ever 4167   81.5 min
+gen  161  practice mean    445 best    536  |  test drive: 894 m then off track  |  best ever 4167   82.4 min
+gen  162  practice mean    384 best    495  |  test drive: 890 m then off track  |  best ever 4167   83.4 min
+gen  163  practice mean    427 best    536  |  test drive: 891 m then off track  |  best ever 4167   84.3 min
+gen  164  practice mean    421 best    536  |  test drive: 896 m then off track  |  best ever 4167   85.2 min
+gen  165  practice mean    413 best    549  |  test drive: 884 m then off track  |  best ever 4167   86.1 min
+gen  166  practice mean    409 best    531  |  test drive: 904 m then off track  |  best ever 4167   87.0 min
+gen  167  practice mean    370 best    495  |  test drive: 899 m then off track  |  best ever 4167   87.9 min
+gen  168  practice mean    428 best    533  |  test drive: 892 m then off track  |  best ever 4167   88.9 min
+gen  169  practice mean    429 best    540  |  test drive: lap 37.96 s  |  best ever 4167   89.8 min
+gen  170  practice mean    381 best    502  |  test drive: 353 m then off track  |  best ever 4167   90.7 min
+gen  171  practice mean    383 best    501  |  test drive: lap 36.04 s  |  best ever 4167   91.6 min
+gen  172  practice mean    452 best    551  |  test drive: 910 m then off track  |  best ever 4167   92.5 min
+gen  173  practice mean    404 best    512  |  test drive: 908 m then off track  |  best ever 4167   93.5 min
+gen  174  practice mean    433 best    542  |  test drive: lap 38.04 s  |  best ever 4167   94.4 min
+gen  175  practice mean    414 best    533  |  test drive: lap 37.48 s  |  best ever 4167   95.3 min
+gen  176  practice mean    433 best    526  |  test drive: lap 36.44 s  |  best ever 4167   96.3 min
+gen  177  practice mean    400 best    546  |  test drive: lap 35.30 s  |  best ever 4197   97.2 min
+gen  178  practice mean    477 best    583  |  test drive: lap 36.04 s  |  best ever 4197   98.3 min
+gen  179  practice mean    496 best    581  |  test drive: 872 m then stuck  |  best ever 4197   99.3 min
+gen  180  practice mean    442 best    552  |  test drive: 515 m then off track  |  best ever 4197  100.2 min
+gen  181  practice mean    417 best    573  |  test drive: lap 35.20 s  |  best ever 4202  101.1 min
+gen  182  practice mean    437 best    556  |  test drive: 512 m then off track  |  best ever 4202  102.1 min
+gen  183  practice mean    437 best    526  |  test drive: lap 35.70 s  |  best ever 4202  103.0 min
+gen  184  practice mean    432 best    543  |  test drive: lap 35.06 s  |  best ever 4209  104.0 min
+gen  185  practice mean    382 best    530  |  test drive: lap 35.78 s  |  best ever 4209  104.8 min
+gen  186  practice mean    489 best    560  |  test drive: lap 38.66 s  |  best ever 4209  105.9 min
+gen  187  practice mean    358 best    456  |  test drive: lap 37.36 s  |  best ever 4209  106.7 min
+gen  188  practice mean    479 best    559  |  test drive: lap 36.98 s  |  best ever 4209  107.7 min
+gen  189  practice mean    335 best    432  |  test drive: lap 36.22 s  |  best ever 4209  108.5 min
+gen  190  practice mean    437 best    530  |  test drive: lap 36.42 s  |  best ever 4209  109.5 min
+gen  191  practice mean    422 best    543  |  test drive: 927 m then off track  |  best ever 4209  110.4 min
+gen  192  practice mean    450 best    572  |  test drive: lap 34.66 s  |  best ever 4229  111.3 min
+gen  193  practice mean    419 best    535  |  test drive: lap 34.16 s  |  best ever 4254  112.1 min
+gen  194  practice mean    289 best    422  |  test drive: lap 35.18 s  |  best ever 4254  112.8 min
+gen  195  practice mean    462 best    540  |  test drive: 945 m then off track  |  best ever 4254  113.7 min
+gen  196  practice mean    454 best    586  |  test drive: lap 34.74 s  |  best ever 4254  114.7 min
+gen  197  practice mean    439 best    554  |  test drive: lap 35.06 s  |  best ever 4254  115.7 min
+gen  198  practice mean    434 best    526  |  test drive: lap 35.28 s  |  best ever 4254  116.6 min
+gen  199  practice mean    410 best    567  |  test drive: lap 34.92 s  |  best ever 4254  117.5 min
+gen  200  practice mean    397 best    541  |  test drive: 559 m then off track  |  best ever 4254  118.4 min
+gen  201  practice mean    333 best    432  |  test drive: lap 35.54 s  |  best ever 4254  119.2 min
+gen  202  practice mean    418 best    510  |  test drive: lap 35.36 s  |  best ever 4254  120.1 min
+gen  203  practice mean    470 best    593  |  test drive: lap 34.76 s  |  best ever 4254  121.0 min
+gen  204  practice mean    431 best    557  |  test drive: lap 35.18 s  |  best ever 4254  121.9 min
+gen  205  practice mean    390 best    506  |  test drive: lap 35.40 s  |  best ever 4254  122.8 min
+gen  206  practice mean    396 best    515  |  test drive: lap 36.02 s  |  best ever 4254  123.7 min
+gen  207  practice mean    424 best    559  |  test drive: lap 35.58 s  |  best ever 4254  124.7 min
+gen  208  practice mean    398 best    566  |  test drive: lap 35.48 s  |  best ever 4254  125.6 min
+gen  209  practice mean    396 best    502  |  test drive: lap 37.92 s  |  best ever 4254  126.5 min
+gen  210  practice mean    452 best    526  |  test drive: 921 m then off track  |  best ever 4254  127.4 min
+gen  211  practice mean    348 best    438  |  test drive: lap 36.96 s  |  best ever 4254  128.2 min
+gen  212  practice mean    424 best    543  |  test drive: lap 37.64 s  |  best ever 4254  129.2 min
+gen  213  practice mean    426 best    518  |  test drive: lap 37.74 s  |  best ever 4254  130.2 min
+gen  214  practice mean    395 best    489  |  test drive: lap 38.20 s  |  best ever 4254  131.1 min
+gen  215  practice mean    473 best    537  |  test drive: lap 37.84 s  |  best ever 4254  132.2 min
+gen  216  practice mean    456 best    545  |  test drive: lap 37.76 s  |  best ever 4254  133.2 min
+gen  217  practice mean    434 best    523  |  test drive: 878 m then off track  |  best ever 4254  134.2 min
+gen  218  practice mean    375 best    493  |  test drive: lap 38.58 s  |  best ever 4254  135.0 min
+gen  219  practice mean    257 best    362  |  test drive: lap 35.24 s  |  best ever 4254  135.7 min
+gen  220  practice mean    327 best    453  |  test drive: lap 37.32 s  |  best ever 4254  136.4 min
+gen  221  practice mean    409 best    526  |  test drive: 346 m then off track  |  best ever 4254  137.4 min
+gen  222  practice mean    411 best    503  |  test drive: 918 m then off track  |  best ever 4254  138.3 min
+gen  223  practice mean    442 best    525  |  test drive: lap 37.72 s  |  best ever 4254  139.3 min
+gen  224  practice mean    414 best    534  |  test drive: lap 37.24 s  |  best ever 4254  140.2 min
+gen  225  practice mean    453 best    543  |  test drive: 924 m then off track  |  best ever 4254  141.2 min
+gen  226  practice mean    430 best    537  |  test drive: lap 38.26 s  |  best ever 4254  142.2 min
+gen  227  practice mean    458 best    563  |  test drive: lap 38.36 s  |  best ever 4254  143.2 min
+gen  228  practice mean    414 best    499  |  test drive: 564 m then off track  |  best ever 4254  144.0 min
+gen  229  practice mean    385 best    492  |  test drive: 909 m then off track  |  best ever 4254  144.9 min
+gen  230  practice mean    367 best    485  |  test drive: 554 m then off track  |  best ever 4254  145.8 min
+gen  231  practice mean    370 best    486  |  test drive: 532 m then off track  |  best ever 4254  146.7 min
+gen  232  practice mean    455 best    566  |  test drive: 917 m then off track  |  best ever 4254  147.7 min
+gen  233  practice mean    404 best    524  |  test drive: 920 m then off track  |  best ever 4254  148.6 min
+gen  234  practice mean    394 best    522  |  test drive: 559 m then off track  |  best ever 4254  149.6 min
+gen  235  practice mean    356 best    435  |  test drive: 915 m then off track  |  best ever 4254  150.3 min
+gen  236  practice mean    429 best    525  |  test drive: 914 m then off track  |  best ever 4254  151.3 min
+gen  237  practice mean    378 best    488  |  test drive: 555 m then off track  |  best ever 4254  152.1 min
+gen  238  practice mean    421 best    578  |  test drive: 916 m then off track  |  best ever 4254  153.0 min
+gen  239  practice mean    444 best    568  |  test drive: 915 m then off track  |  best ever 4254  154.0 min
+gen  240  practice mean    337 best    469  |  test drive: 558 m then off track  |  best ever 4254  154.8 min
+gen  241  practice mean    473 best    576  |  test drive: 556 m then off track  |  best ever 4254  155.8 min
+gen  242  practice mean    468 best    546  |  test drive: 908 m then off track  |  best ever 4254  156.8 min
+gen  243  practice mean    424 best    538  |  test drive: 927 m then off track  |  best ever 4254  157.7 min
+gen  244  practice mean    415 best    536  |  test drive: 923 m then off track  |  best ever 4254  158.6 min
+gen  245  practice mean    381 best    530  |  test drive: lap 37.60 s  |  best ever 4254  159.5 min
+gen  246  practice mean    357 best    433  |  test drive: 553 m then off track  |  best ever 4254  160.3 min
+gen  247  practice mean    469 best    593  |  test drive: lap 37.24 s  |  best ever 4254  161.4 min
+gen  248  practice mean    371 best    499  |  test drive: lap 37.06 s  |  best ever 4254  162.3 min
+gen  249  practice mean    468 best    566  |  test drive: lap 36.08 s  |  best ever 4254  163.3 min
+gen  250  practice mean    425 best    560  |  test drive: 933 m then off track  |  best ever 4254  164.2 min
+gen  251  practice mean    464 best    576  |  test drive: lap 34.96 s  |  best ever 4254  165.2 min
+gen  252  practice mean    467 best    562  |  test drive: 925 m then off track  |  best ever 4254  166.1 min
+gen  253  practice mean    478 best    562  |  test drive: 917 m then off track  |  best ever 4254  167.1 min
+gen  254  practice mean    452 best    583  |  test drive: 918 m then off track  |  best ever 4254  168.1 min
+gen  255  practice mean    476 best    555  |  test drive: 933 m then off track  |  best ever 4254  169.1 min
+gen  256  practice mean    272 best    379  |  test drive: lap 35.78 s  |  best ever 4254  169.8 min
+gen  257  practice mean    515 best    583  |  test drive: lap 35.64 s  |  best ever 4254  170.9 min
+gen  258  practice mean    455 best    554  |  test drive: 925 m then off track  |  best ever 4254  171.8 min
+gen  259  practice mean    420 best    536  |  test drive: lap 35.72 s  |  best ever 4254  172.8 min
+gen  260  practice mean    394 best    545  |  test drive: lap 35.98 s  |  best ever 4254  173.7 min
+gen  261  practice mean    472 best    553  |  test drive: lap 35.06 s  |  best ever 4254  174.7 min
+gen  262  practice mean    417 best    522  |  test drive: lap 35.12 s  |  best ever 4254  175.6 min
+gen  263  practice mean    367 best    439  |  test drive: lap 35.20 s  |  best ever 4254  176.4 min
+gen  264  practice mean    489 best    592  |  test drive: lap 35.32 s  |  best ever 4254  177.4 min
+gen  265  practice mean    378 best    519  |  test drive: 927 m then off track  |  best ever 4254  178.2 min
+gen  266  practice mean    473 best    575  |  test drive: lap 35.86 s  |  best ever 4254  179.2 min
+gen  267  practice mean    485 best    580  |  test drive: lap 35.94 s  |  best ever 4254  180.2 min
+gen  268  practice mean    484 best    554  |  test drive: lap 35.40 s  |  best ever 4254  181.2 min
+gen  269  practice mean    363 best    470  |  test drive: lap 35.14 s  |  best ever 4254  182.1 min
+gen  270  practice mean    381 best    515  |  test drive: 909 m then off track  |  best ever 4254  183.0 min
+gen  271  practice mean    477 best    592  |  test drive: 918 m then off track  |  best ever 4254  183.9 min
+gen  272  practice mean    487 best    544  |  test drive: 910 m then off track  |  best ever 4254  184.9 min
+gen  273  practice mean    428 best    551  |  test drive: lap 35.00 s  |  best ever 4254  185.8 min
+gen  274  practice mean    489 best    588  |  test drive: 296 m then stuck  |  best ever 4254  186.7 min
+gen  275  practice mean    439 best    505  |  test drive: lap 36.18 s  |  best ever 4254  187.8 min
+gen  276  practice mean    458 best    557  |  test drive: 922 m then off track  |  best ever 4254  188.8 min
+gen  277  practice mean    437 best    512  |  test drive: lap 35.88 s  |  best ever 4254  189.8 min
+gen  278  practice mean    435 best    548  |  test drive: lap 36.26 s  |  best ever 4254  190.7 min
+gen  279  practice mean    401 best    510  |  test drive: lap 36.92 s  |  best ever 4254  191.7 min
+gen  280  practice mean    358 best    416  |  test drive: lap 37.32 s  |  best ever 4254  192.6 min
+gen  281  practice mean    395 best    496  |  test drive: lap 34.00 s  |  best ever 4262  193.5 min
+gen  282  practice mean    408 best    543  |  test drive: lap 34.14 s  |  best ever 4262  194.4 min
+gen  283  practice mean    417 best    525  |  test drive: 294 m then stuck  |  best ever 4262  195.3 min
+gen  284  practice mean    409 best    525  |  test drive: 918 m then off track  |  best ever 4262  196.2 min
+gen  285  practice mean    224 best    307  |  test drive: lap 35.62 s  |  best ever 4262  196.8 min
+gen  286  practice mean    453 best    555  |  test drive: lap 35.14 s  |  best ever 4262  197.7 min
+gen  287  practice mean    467 best    558  |  test drive: 910 m then off track  |  best ever 4262  198.7 min
+gen  288  practice mean    431 best    534  |  test drive: 933 m then off track  |  best ever 4262  199.7 min
+gen  289  practice mean    489 best    568  |  test drive: lap 34.84 s  |  best ever 4262  200.7 min
+gen  290  practice mean    341 best    435  |  test drive: 921 m then off track  |  best ever 4262  201.5 min
+gen  291  practice mean    362 best    431  |  test drive: 915 m then off track  |  best ever 4262  202.3 min
+gen  292  practice mean    393 best    512  |  test drive: 911 m then off track  |  best ever 4262  203.2 min
+gen  293  practice mean    423 best    553  |  test drive: 553 m then off track  |  best ever 4262  204.1 min
+gen  294  practice mean    426 best    528  |  test drive: 900 m then off track  |  best ever 4262  205.2 min
+gen  295  practice mean    376 best    457  |  test drive: lap 36.32 s  |  best ever 4262  206.0 min
+gen  296  practice mean    473 best    557  |  test drive: lap 36.26 s  |  best ever 4262  207.1 min
+gen  297  practice mean    501 best    573  |  test drive: 916 m then off track  |  best ever 4262  208.1 min
+gen  298  practice mean    458 best    565  |  test drive: 906 m then off track  |  best ever 4262  209.0 min
+gen  299  practice mean    413 best    490  |  test drive: 327 m then off track  |  best ever 4262  210.0 min
+gen  300  practice mean    466 best    541  |  test drive: lap 35.60 s  |  best ever 4262  211.0 min
+gen  301  practice mean    369 best    450  |  test drive: 339 m then off track  |  best ever 4262  211.7 min
+gen  302  practice mean    388 best    482  |  test drive: lap 35.86 s  |  best ever 4262  212.7 min
+gen  303  practice mean    465 best    612  |  test drive: lap 36.60 s  |  best ever 4262  213.6 min
+gen  304  practice mean    479 best    572  |  test drive: 927 m then off track  |  best ever 4262  214.6 min
+gen  305  practice mean    463 best    544  |  test drive: 919 m then off track  |  best ever 4262  215.6 min
+gen  306  practice mean    432 best    538  |  test drive: lap 34.90 s  |  best ever 4262  216.6 min
+gen  307  practice mean    419 best    523  |  test drive: lap 35.12 s  |  best ever 4262  217.6 min
+gen  308  practice mean    454 best    566  |  test drive: 921 m then off track  |  best ever 4262  218.5 min
+gen  309  practice mean    476 best    609  |  test drive: 915 m then off track  |  best ever 4262  219.5 min
+gen  310  practice mean    424 best    519  |  test drive: 885 m then off track  |  best ever 4262  220.4 min
+gen  311  practice mean    434 best    540  |  test drive: 910 m then off track  |  best ever 4262  221.3 min
+gen  312  practice mean    442 best    521  |  test drive: lap 33.54 s  |  best ever 4285  222.5 min
+gen  313  practice mean    394 best    541  |  test drive: lap 34.54 s  |  best ever 4285  223.4 min
+gen  314  practice mean    429 best    521  |  test drive: lap 35.24 s  |  best ever 4285  224.3 min
+gen  315  practice mean    402 best    546  |  test drive: 544 m then off track  |  best ever 4285  225.3 min
+gen  316  practice mean    460 best    551  |  test drive: lap 34.50 s  |  best ever 4285  226.4 min
+gen  317  practice mean    499 best    574  |  test drive: lap 34.62 s  |  best ever 4285  227.5 min
+gen  318  practice mean    381 best    568  |  test drive: lap 35.22 s  |  best ever 4285  228.4 min
+gen  319  practice mean    471 best    564  |  test drive: 556 m then off track  |  best ever 4285  229.5 min
+stopped; progress is saved — run the same command to continue

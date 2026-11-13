@@ -57,3 +57,34 @@ def test_server_drives_with_the_learned_policy(tmp_path, monkeypatch):
     msg = sess.state_message()
     assert sess.track_message()["learned"] is True
     assert msg["t"] == pytest.approx(2.0, abs=1e-6)
+
+
+def test_distance_cap_ends_the_episode():
+    zero = np.zeros(Policy(N_OBS).size)  # coasts straight on from the line
+    fit, info = run_episode(zero, EpisodeConfig(track="short", max_time=30.0, start_speed=20.0,
+                                                max_distance=60.0))
+    assert info["reason"] == "distance"
+    assert 60.0 <= info["progress"] < 70.0
+
+
+def test_crash_costs_a_penalty_and_surviving_beats_crashing():
+    pol = Policy(N_OBS).init_random(np.random.default_rng(0))  # random net: leaves the track quickly
+    base = EpisodeConfig(track="short", max_time=10.0)
+    f0, i0 = run_episode(pol.theta, base)
+    assert i0["reason"] in ("off track", "stuck")
+    f1, _ = run_episode(pol.theta, EpisodeConfig(track="short", max_time=10.0, crash_penalty=250.0))
+    assert f1 == pytest.approx(f0 - 250.0)
+    # a slow run that survives the whole distance outscores a faster run that crashes before it
+    zero = np.zeros(Policy(N_OBS).size)
+    fs, info = run_episode(zero, EpisodeConfig(track="short", max_time=30.0, start_speed=15.0,
+                                               max_distance=50.0, crash_penalty=250.0))
+    assert info["reason"] == "distance" and fs > f1
+
+
+def test_time_bonus_only_when_the_distance_is_reached():
+    zero = np.zeros(Policy(N_OBS).size)
+    kw = dict(track="short", max_time=30.0, start_speed=20.0, max_distance=60.0)
+    f_plain, i = run_episode(zero, EpisodeConfig(**kw))
+    f_bonus, _ = run_episode(zero, EpisodeConfig(**kw, time_bonus=10.0, ref_speed=10.0))
+    assert f_bonus == pytest.approx(f_plain + 10.0 * max(0.0, 60.0 / 10.0 - i["time"]))
+    assert f_bonus > f_plain

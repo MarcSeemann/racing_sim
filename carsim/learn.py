@@ -13,6 +13,11 @@ track without leaving it. Rewards:
     distance along the track (m)  - time-outs/crashes end the episode early
     + a bonus for a completed lap, larger the faster the lap
 
+Practice episodes are capped by DISTANCE, not time (a time cap rewards crashing fast over
+surviving slowly): the run from the line covers the whole lap, runs from random starts cover
+`start_distance` metres. Leaving the track costs a penalty, and reaching the cap earlier earns a
+small bonus, so the order of priorities is: stay on track > cover the distance > be quick.
+
 Train in the background (resumes from the last checkpoint):
 
     python -m carsim.learn train --track short --workers 8          # Ctrl+C any time
@@ -106,6 +111,11 @@ class EpisodeConfig:
     off_margin: float = 1.0  # m beyond the track edge that ends the episode
     alive_bonus: float = 0.0  # fitness per second on track (rewards slowing down rather than crashing)
     lap_bonus: bool = True  # practice runs from random starts do not count laps
+    max_distance: float = 0.0  # m; the episode ends with reason "distance" when reached (0 = no cap)
+    crash_penalty: float = 0.0  # fitness lost for leaving the track or getting stuck
+    crash_speed_penalty: float = 0.0  # extra fitness lost per m/s of speed at impact (crashing slower is less bad)
+    time_bonus: float = 0.0  # fitness per second saved reaching max_distance faster than ref_speed
+    ref_speed: float = 15.0  # m/s; reaching the cap slower than this earns no time bonus
 
 
 def _start_gear(car, v):
@@ -161,13 +171,22 @@ def run_episode(theta, cfg: EpisodeConfig, track=None, record=False):
         if slow > 3.0 or progress < -20:
             reason = "stuck"
             break
+        if cfg.max_distance and progress >= cfg.max_distance:
+            reason = "distance"
+            break
         if len(lap_times) >= cfg.laps:
             reason = "lap"
             break
     fitness = progress + cfg.alive_bonus * s.t
+    if reason == "off track":
+        fitness -= cfg.crash_penalty + cfg.crash_speed_penalty * s.speed
+    elif reason == "stuck":  # never cheaper than a fast crash, or standing still becomes attractive
+        fitness -= cfg.crash_penalty + cfg.crash_speed_penalty * 60.0
+    elif reason == "distance" and cfg.time_bonus:
+        fitness += cfg.time_bonus * max(0.0, cfg.max_distance / cfg.ref_speed - s.t)
     if lap_times and cfg.lap_bonus:  # finishing matters most; faster laps score more
         fitness += 2000.0 + 50.0 * max(0.0, 3.0 * track.length / 60.0 - lap_times[0])
-    info = {"progress": progress, "laps": lap_times, "reason": reason, "time": s.t}
+    info = {"progress": progress, "laps": lap_times, "reason": reason, "time": s.t, "speed": s.speed}
     return (fitness, info, rows) if record else (fitness, info)
 
 
@@ -179,6 +198,13 @@ class TrainConfig:
     starts: int = 4  # practice runs per generation: one from the line, the rest at random places
     start_time: float = 14.0  # s per random-start episode
     start_speed: tuple = (10.0, 35.0)  # m/s range of start speeds
+    start_distance: float = 500.0  # m each random-start practice run must cover (the line run covers the full lap)
+    crash_penalty_frac: float = 0.5  # crash penalty as a fraction of the distance the run had to cover
+    time_bonus: float = 10.0  # fitness per second saved on a practice run (small next to the crash penalty)
+    crash_speed_penalty: float = 6.0  # per m/s at impact: gives a gradient towards braking before a corner
+    corner_focus: float = 0.5  # share of the random starts placed on the approach to a corner
+    corner_speed: tuple = (25.0, 55.0)  # m/s start speeds for those corner-approach runs
+    corner_approach: tuple = (40.0, 250.0)  # m before the corner entry that those runs start
     sigma: float = 0.05  # perturbation size
     lr: float = 0.03
     weight_decay: float = 0.002
@@ -214,6 +240,13 @@ def _ranks(x):
     r = np.empty(len(x))
     r[np.argsort(x)] = np.arange(len(x))
     return r / (len(x) - 1) - 0.5
+
+
+def corner_entries(track, threshold: float = 0.015):
+    """Distances (m along the lap) where the track turns tighter than 1/threshold metres radius."""
+    k = np.abs(np.asarray(track.curvature))
+    idx = np.where((k[1:] > threshold) & (k[:-1] <= threshold))[0] + 1
+    return [float(track.s[i]) for i in idx]
 
 
 def run_dir(track: str) -> Path:
@@ -270,17 +303,34 @@ def train(cfg: TrainConfig, workers: int = 2, generations: int | None = None, ho
                 eps = rng.standard_normal((half, policy.size))
                 thetas = [policy.theta + cfg.sigma * e for e in eps] + [policy.theta - cfg.sigma * e for e in eps]
                 # Training episodes: the same few random starts for every perturbation (fair comparison).
-                track_len = TRACKS[cfg.track]().length
-                # One practice run always starts from the line like the real test (its braking zones
-                # matter most); the others start at random places and speeds around the lap.
-                starts = [EpisodeConfig(track=cfg.track, max_time=cfg.start_time * 1.5, laps=99,
+                tr = TRACKS[cfg.track]()
+                track_len = tr.length
+                # One practice run always starts from the line and must cover the WHOLE lap like the real
+                # test (its braking zones matter most); the others start at random places and speeds and
+                # cover start_distance metres. Distance caps (not time caps) so that surviving beats
+                # crashing fast; the time limit is only a safety net for crawling cars.
+                start_dist = min(cfg.start_distance, track_len)
+                corners = corner_entries(tr)
+                starts = [EpisodeConfig(track=cfg.track, max_time=cfg.episode.max_time, laps=99,
                                         start_s=0.0, start_speed=cfg.episode.start_speed,
-                                        alive_bonus=3.0, lap_bonus=False)]
-                starts += [EpisodeConfig(track=cfg.track, max_time=cfg.start_time, laps=99,
-                                         start_s=float(rng.uniform(0, track_len)),
-                                         start_speed=float(rng.uniform(*cfg.start_speed)), alive_bonus=3.0,
-                                         lap_bonus=False)
-                           for _ in range(cfg.starts - 1)]
+                                        lap_bonus=False, max_distance=track_len,
+                                        crash_penalty=cfg.crash_penalty_frac * track_len,
+                                        crash_speed_penalty=cfg.crash_speed_penalty,
+                                        time_bonus=cfg.time_bonus)]
+                for _ in range(cfg.starts - 1):
+                    if corners and rng.random() < cfg.corner_focus:  # practise braking for a corner
+                        c = corners[int(rng.integers(len(corners)))]
+                        start_s = float((c - rng.uniform(*cfg.corner_approach)) % track_len)
+                        speed = float(rng.uniform(*cfg.corner_speed))
+                    else:
+                        start_s = float(rng.uniform(0, track_len))
+                        speed = float(rng.uniform(*cfg.start_speed))
+                    starts.append(EpisodeConfig(track=cfg.track, max_time=start_dist / 8.0, laps=99,
+                                                start_s=start_s, start_speed=speed,
+                                                lap_bonus=False, max_distance=start_dist,
+                                                crash_penalty=cfg.crash_penalty_frac * start_dist,
+                                                crash_speed_penalty=cfg.crash_speed_penalty,
+                                                time_bonus=cfg.time_bonus))
                 # Plus the real test: a full lap from the line with the current network.
                 jobs = [(th, starts) for th in thetas] + [(policy.theta, cfg.episode)]
                 results = list(ex.map(_eval_one, jobs))
