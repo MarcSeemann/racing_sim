@@ -6,6 +6,7 @@ Build one from straights and arcs (`from_segments`), from surveyed points
 (`from_points`, `from_csv` — e.g. a real circuit's x, y, z), and add elevation
 with `with_elevation`.
 """
+import bisect
 import math
 from dataclasses import dataclass
 
@@ -32,6 +33,10 @@ class Track:
             self.z = np.zeros_like(self.s)
         if self.grade is None or self.vert_curv is None:
             self._derive_vertical()
+        # Plain-float copies for the per-step lookups (much faster than numpy on scalars).
+        self._sl = [float(v) for v in self.s]
+        self._xl = [float(v) for v in self.x]
+        self._yl = [float(v) for v in self.y]
 
     def _derive_vertical(self):
         ds = np.gradient(self.s)
@@ -146,11 +151,32 @@ class Track:
         return "grass"
 
     def index_at(self, s: float) -> int:
-        return int(np.searchsorted(self.s, s % self.length, side="right") - 1)
+        return bisect.bisect_right(self._sl, s % self.length) - 1
 
     def nearest(self, x: float, y: float, guess: int, window: int = 60) -> int:
-        """Nearest centreline index, searching around a guess (cars move forward)."""
-        n = len(self.s)
+        """Nearest centreline index, searching around a guess (cars move forward).
+
+        With the default window this walks from the guess to the nearest point (a car moves at
+        most a few samples per step); a larger window searches the whole window."""
+        n = len(self._sl)
+        if window == 60:
+            xs, ys = self._xl, self._yl
+            i = guess % n
+            d = (xs[i] - x) ** 2 + (ys[i] - y) ** 2
+            for _ in range(70):
+                j = (i + 1) % n
+                dj = (xs[j] - x) ** 2 + (ys[j] - y) ** 2
+                if dj < d:
+                    i, d = j, dj
+                    continue
+                j = (i - 1) % n
+                dj = (xs[j] - x) ** 2 + (ys[j] - y) ** 2
+                if dj < d:
+                    i, d = j, dj
+                    continue
+                return i
+            # walked far: fall back to the window search around where it got to
+            guess = i
         idx = (np.arange(guess - 10, guess + window) % n)
         d2 = (self.x[idx] - x) ** 2 + (self.y[idx] - y) ** 2
         return int(idx[int(np.argmin(d2))])

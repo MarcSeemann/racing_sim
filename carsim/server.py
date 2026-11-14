@@ -80,8 +80,11 @@ class Session:
         s.w = [0.0] * 4
         s.steer = s.throttle = s.brake = 0.0
         s.alpha = [0.0] * 4
+        s.z = s.zd = s.th = s.thd = s.ph = s.phd = 0.0  # suspension back at rest
+        s.zu, s.zud, s.road = [0.0] * 4, [0.0] * 4, [0.0] * 4
         s.gear = 1
         self.cond.i = i
+        self.car.settle()
 
     def step(self, n: int):
         s = self.car.state
@@ -123,7 +126,7 @@ class Session:
         # its suspension. Roll: ~0.35 deg per g, about what a stiff single-seater shows.
         grade = float(tr.grade[i])
         body_pitch = math.atan2((hf - hr) - (c.ride_height_front - c.ride_height_rear), c.wheelbase)
-        roll = -0.0006 * s.ay
+        roll = -s.ph if self.car.p.chassis.suspension == "dynamic" else -0.0006 * s.ay  # body roll from the suspension
         body_dz = (hf + hr) / 2 - (c.ride_height_front + c.ride_height_rear) / 2
         z = float(tr.z[i])
         g = lambda k, d=0.0: float(row.get(k, d))
@@ -140,6 +143,7 @@ class Session:
                 "wear": [round(g(f"wear_{n}"), 3) for n in ("fl", "fr", "rl", "rr")],
                 "fuel": round(self.car.fuel, 2), "rain": round(g("rain"), 2), "water": round(g("water"), 3),
                 "track_temp": round(g("track_temp"), 1), "grass": int(g("grass_wheels")),
+                "ers": round(g("ers_soc"), 3), "brake_temps": [round(g(f"tbrake_{n}")) for n in ("fl", "fr", "rl", "rr")],
                 "drs": bool(row.get("drs", False)), "s": round(float(tr.s[i]), 1)}
 
 

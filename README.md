@@ -13,14 +13,16 @@ line are all modelled and can be switched on, changed and compared.
 
 | Area | What's in it |
 | --- | --- |
-| Powertrain | Torque curve, 8-speed gearbox, clutch slip at launch, engine braking, traction control, air-density power loss |
+| Powertrain | Torque curve, 8-speed gearbox, clutch slip at launch, engine braking, traction control, air-density power loss; clutch-pack limited-slip diff (preload + power/coast ramps) |
+| Hybrid (ERS) | 4 MJ battery, 120 kW MGU-K deployment and braking harvest (brake-by-wire takes it off the rear discs), MGU-H exhaust recovery, ECU clipping as the battery runs low |
 | Tyres | Pacejka "Magic Formula", combined slip (friction ellipse), load sensitivity, spinning wheels with lock-up and wheelspin |
-| Chassis | Four-wheel planar model: steering, yaw, longitudinal and lateral load transfer, roll-stiffness split, limited-slip diff |
+| Chassis | Four-wheel planar model: steering (with Ackermann), yaw, sprung body with heave, pitch and roll |
+| Suspension | Corner springs, heave (third) springs, anti-roll bars, asymmetric dampers, bump stops, four unsprung wheels on tyre springs; geometric load transfer through roll centres and anti-dive/anti-squat, elastic transfer through body roll and pitch; skid plank that bottoms out and slides; camber from static setting and roll |
 | Control limits | Steering rate limit at the rack (slower at speed, as the tyres load up), throttle and brake-pressure build-up rates, tyre relaxation length (lateral force lags the slip angle), gearbox refuses over-revving downshifts. They live in the car, so every driver — you, the scripted AI and the learned AI — gets the same limits |
 | Brakes | Brake bias, lock-up, rear-bias spin; carbon disc temperature per corner (little bite cold, fade above ~1000 °C, cooled through the ducts) |
-| Aerodynamics | Downforce and drag vs ride height (ground effect, floor stall), aero balance shift, induced drag, DRS |
+| Aerodynamics | Downforce and drag vs ride height (ground effect, floor stall) and rake, loss in yaw (sliding), aero balance shift, induced drag, drag pitching moment, DRS |
 | Tyre thermals | Surface and core temperature, hot pressure, wear with a cliff, grip window, water cooling |
-| Track | Elevation, crests and compressions, kerbs and grass, rubbering-in, layouts from coordinates |
+| Track | Elevation, crests and compressions, kerbs and grass (grip and a road profile: kerb ridges with serrations, bumpy grass, asphalt waves felt through the suspension), rubbering-in, layouts from coordinates |
 | Weather | Timeline of rain, air temperature, cloud and wind; track temperature; standing water, drainage, drying line |
 | Wet tyres | Slick, intermediate and full wet, with their own wet grip and aquaplaning speed |
 | Fuel | Burn from engine power; mass, weight split, centre of gravity and inertia change as it burns |

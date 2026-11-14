@@ -21,8 +21,10 @@ class AeroResult:
     CdA: float
 
 
-def aero_forces(aero, rho: float, v_air: float, v: float, h_front: float, drs: bool = False) -> AeroResult:
-    """Aero forces for air speed v_air (drag) and road speed v (downforce), front ride height h_front (m)."""
+def aero_forces(aero, rho: float, v_air: float, v: float, h_front: float, drs: bool = False,
+                h_rear: float | None = None, yaw: float = 0.0) -> AeroResult:
+    """Aero forces for air speed v_air (drag) and road speed v (downforce), front ride height h_front (m),
+    rear ride height h_rear (m, rake; None = nominal) and body sideslip yaw (rad)."""
     # Ground effect on the front ride height.
     h_ref, h_stall = aero.ride_height_ref, aero.stall_height
     if h_front >= h_stall:
@@ -30,8 +32,15 @@ def aero_forces(aero, rho: float, v_air: float, v: float, h_front: float, drs: b
     else:
         at_stall = 1 + aero.ride_height_sensitivity * (h_ref - h_stall) / h_ref
         factor = at_stall * (1 - aero.stall_loss * (h_stall - h_front) / h_stall)
+    if h_rear is not None:  # more rake: more diffuser downforce, balance forward (small, capped)
+        d_r = max(min(h_rear - aero.rear_height_ref, 0.06), -0.06)
+        factor *= 1 + aero.rake_sensitivity * d_r
+    if yaw:  # the floor and wings lose downforce when the car is sideways
+        factor *= 1 - min(aero.yaw_loss * yaw * yaw, aero.yaw_loss_max)
     cla = aero.ClA * max(factor, 0.3)
     front = aero.front_balance + aero.balance_per_m * (h_ref - h_front)
+    if h_rear is not None:
+        front += aero.rake_balance_per_m * max(min(h_rear - aero.rear_height_ref, 0.06), -0.06)
 
     cda = aero.CdA + aero.induced_drag * (cla - aero.ClA)
     if drs:

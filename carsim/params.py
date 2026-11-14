@@ -53,6 +53,13 @@ class Aero:
     drs_rear_loss: float = 0.32  # share of rear downforce lost with DRS open
     drs_drag_reduction: float = 0.10  # CdA removed with DRS open
     side_force_area: float = 1.5  # Cy * side area, m^2 (crosswind force)
+    # Phase 14: rake (rear ride height) and yaw sensitivity, drag pitching moment.
+    rear_height_ref: float = 0.040  # m, rear ride height (at speed) at which ClA/balance take their nominal values
+    rake_sensitivity: float = 0.6  # +ClA share per m of extra rear height (+3% per +50 mm), until it stalls the diffuser
+    rake_balance_per_m: float = 0.5  # front-balance gain per m of extra rear height
+    yaw_loss: float = 16.0  # ClA share lost per rad^2 of sideslip (~12% at 5 deg)
+    yaw_loss_max: float = 0.40
+    drag_height: float = 0.40  # m, height at which drag acts (pitches the car nose-up on the straight)
 
 
 @dataclass
@@ -81,7 +88,7 @@ class Chassis:
     # Suspension heave (phase 6): parked ride heights and axle heave stiffness.
     ride_height_front: float = 0.035  # m
     ride_height_rear: float = 0.080
-    heave_stiffness_front: float = 500e3  # N/m per axle
+    heave_stiffness_front: float = 500e3  # N/m per axle, body to the ground (springs and tyres in series)
     heave_stiffness_rear: float = 300e3
     min_ride_height: float = 0.002  # skid blocks
     max_brake_force: float = 40000.0  # N at full pedal, before grip limit
@@ -102,6 +109,40 @@ class Chassis:
     # to build up after the slip angle changes. 0 = instant (the old behaviour).
     relaxation_length: float = 0.35  # m
     overrev_protection: bool = True  # the gearbox refuses a downshift that would over-rev the engine
+    # Differential (phase 14): clutch-pack limited slip. Locking torque = preload + ramp x input torque
+    # (power ramp on throttle, coast ramp under engine braking); diff_locking adds a viscous part.
+    diff_preload: float = 80.0  # N m
+    diff_power_lock: float = 0.35  # share of the drive torque that can be locked across on power
+    diff_coast_lock: float = 0.20  # same, off throttle (engine braking)
+    # Suspension (phase 14): "dynamic" = sprung body with heave, pitch and roll on springs, dampers
+    # and anti-roll bars, four unsprung wheels on tyre springs, roll centres, anti-dive/squat and a
+    # plank that touches the ground. "quasi_static" = the old lagged load-transfer model.
+    suspension: str = "dynamic"
+    unsprung_front: float = 18.0  # kg per corner (wheel, tyre, upright, brakes, half the links)
+    unsprung_rear: float = 20.0
+    roll_inertia: float = 120.0  # kg m^2, sprung body about its roll axis
+    pitch_inertia: float = 850.0  # kg m^2, sprung body about its pitch axis
+    roll_gradient_deg_per_g: float = 0.35  # body roll per g of lateral acceleration (springs + bars)
+    roll_centre_front: float = 0.04  # m above the ground
+    roll_centre_rear: float = 0.07
+    anti_dive: float = 0.30  # share of the braking pitch moment taken by the links (not the springs)
+    anti_squat: float = 0.25
+    damping_bump: float = 0.45  # damping ratio of the body on each corner's spring, compression
+    damping_rebound: float = 0.65  # extension
+    bump_travel: float = 0.030  # m of wheel travel before the bump stop
+    bump_stop_rate: float = 2.0e6  # N/m of the (packer) bump stop
+    tyre_vertical_rate: float = 350e3  # N/m per tyre (low-profile 18-inch race tyre)
+    tyre_vertical_damping: float = 400.0  # N s/m per tyre
+    plank_rate: float = 3.0e6  # N/m of the skid plank on the track when the floor bottoms out
+    plank_friction: float = 0.35  # friction of the plank sliding on the track
+    # Camber (phase 14): static camber and how much of the body roll the wheels follow.
+    camber_front_deg: float = -3.0
+    camber_rear_deg: float = -1.5
+    camber_roll_follow: float = 0.45  # share of body roll that tilts the wheel (1 = rigid to the body)
+    camber_opt_deg: float = -3.5  # camber (leaning into the corner) of peak lateral grip
+    camber_lat_loss: float = 0.0010  # lateral grip lost per deg^2 away from the optimum
+    camber_long_loss: float = 0.0020  # braking/traction grip lost per deg^2 of camber
+    ackermann: float = 0.0  # 0 = parallel steer, 1 = full Ackermann (inner wheel steers more)
 
 
 @dataclass
@@ -159,6 +200,28 @@ class Fuel:
 
 
 @dataclass
+class ERS:
+    """Hybrid energy recovery (phase 14): the MGU-K adds up to `power` at the crank while the battery
+    has charge, and harvests up to `harvest_power` from the rear axle under braking (brake-by-wire
+    takes that share off the rear friction brakes). The engine torque curve includes the full
+    deployment, so with charge in the battery the car is exactly as fast as before; flat, it loses
+    `power` at full throttle."""
+    enabled: bool = True
+    power: float = 120e3  # W at full throttle
+    harvest_power: float = 120e3  # W
+    store: float = 4.0e6  # J usable in the battery
+    start_soc: float = 1.0  # share of `store` at the start
+    deploy_efficiency: float = 0.95  # battery to crank
+    harvest_efficiency: float = 0.85  # wheel to battery
+    min_harvest_speed: float = 8.0  # m/s
+    exhaust_harvest: float = 40e3  # W recovered from the exhaust (MGU-H) at full throttle, high revs
+    # Deployment strategy of the ECU: full power above soc_taper, tapering to nothing at soc_floor
+    # ("clipping" at the end of the straights instead of running the battery flat).
+    soc_floor: float = 0.08
+    soc_taper: float = 0.35
+
+
+@dataclass
 class CarParams:
     engine: Engine = field(default_factory=Engine)
     gearbox: Gearbox = field(default_factory=Gearbox)
@@ -168,6 +231,7 @@ class CarParams:
     thermal: ThermalParams = field(default_factory=ThermalParams)
     fuel: Fuel = field(default_factory=Fuel)
     brakes: Brakes = field(default_factory=Brakes)
+    ers: ERS = field(default_factory=ERS)
     tyre_thermals: bool = True  # False = tyres always at optimum, never wear
 
 

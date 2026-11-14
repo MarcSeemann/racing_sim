@@ -123,6 +123,11 @@ class SurfaceParams:
     track_tau: float = 1200.0  # s, track temperature time constant (dry)
     rain_track_tau: float = 300.0  # s, faster when rain is cooling it
     water_cooling: float = 25.0  # W/K per mm of water per sqrt(m/s), extra tyre cooling
+    # Road profile under the wheels (phase 14), felt through the suspension.
+    roughness: float = 0.0015  # m, amplitude of the asphalt's long-wave bumps
+    kerb_height: float = 0.030  # m, peak height of a kerb
+    kerb_period: float = 1.6  # m, ripple length of the kerb's serrations
+    grass_bump: float = 0.012  # m, amplitude of bumps on the grass
 
 
 class Conditions:
@@ -145,6 +150,7 @@ class Conditions:
         self._last_bin = None
         self._off_line = float(water_mm)  # water off the racing line (nobody clears it)
         self.line_offset = np.zeros(len(track.s))  # where the cars drive, m from the centreline
+        self._wet = water_mm > 0
 
     def set_racing_line(self, offsets):
         """Tell the track where the cars drive (rubber and the drying line follow it)."""
@@ -162,11 +168,13 @@ class Conditions:
         self.i = self.track.nearest(x, y, self.i)
         return self.i
 
-    def wheel_surface(self, s_wheel: float, offset: float, compound: Compound, speed: float):
-        """(grip factor, water depth mm, surface name) for a wheel at s along the lap, lateral offset."""
+    def wheel_surface(self, s_wheel: float, offset: float, compound: Compound, speed: float, i_hint=None):
+        """(grip factor, water depth mm, surface name) for a wheel at s along the lap, lateral offset.
+        i_hint: the centreline index at s_wheel if the caller knows it (saves a search)."""
         b = self.bin_of(s_wheel)
         surf = self.track.surface_at(offset)
-        on_line = abs(offset - self.line_offset[self.track.index_at(s_wheel)]) <= self.sp.line_width
+        j = self.track.index_at(s_wheel) if i_hint is None else i_hint
+        on_line = abs(offset - self.line_offset[j]) <= self.sp.line_width
         depth = self.water[b] if on_line else max(self.water[b], self._off_line)
         grip = wet_grip(compound, depth, speed)
         if surf == "track":
@@ -177,6 +185,21 @@ class Conditions:
         else:
             grip *= self.sp.grass_grip
         return grip, depth, surf
+
+    def road_height(self, s_wheel: float, offset: float, asphalt_only: bool = False) -> float:
+        """Height of the surface under a wheel (m): asphalt waves, kerb ridge and serrations, grass bumps.
+        asphalt_only: just the asphalt waves (what the floor sees down the middle of the car)."""
+        sp, tr = self.sp, self.track
+        tau = 2 * math.pi
+        h = sp.roughness * (0.5 * math.sin(tau * s_wheel / 7.3) + 0.3 * math.sin(tau * s_wheel / 2.9 + 1.3)
+                            + 0.2 * math.sin(tau * s_wheel / 1.1 + 0.7 * offset))
+        a = abs(offset) - tr.width / 2
+        if a > 0 and not asphalt_only:
+            if a <= tr.kerb_width:
+                h += sp.kerb_height * math.sin(math.pi * a / tr.kerb_width) * (0.7 + 0.3 * math.sin(tau * s_wheel / sp.kerb_period))
+            else:
+                h += sp.grass_bump * (0.6 * math.sin(tau * s_wheel / 3.7 + offset) + 0.4 * math.sin(tau * s_wheel / 1.3))
+        return h
 
     def vertical(self, i: int):
         return float(self.track.grade[i]), float(self.track.vert_curv[i])
@@ -221,14 +244,22 @@ class Conditions:
         if w.rain_mm_h > 0.1:
             target, tau = w.air_temp_c - 1.0, sp.rain_track_tau
         self.track_temp += (target - self.track_temp) * dt / tau
-        # Water everywhere: rain in, drainage and evaporation out.
+        # Water everywhere: rain in, drainage and evaporation out (nothing to do on a dry track).
         rain = w.rain_mm_h / 3600.0
+        if rain <= 0 and not self._wet:
+            b = self.bin_of(s_car)
+            self.rubber[b] += sliding_power * dt * self.cars
+            self._last_bin = b
+            return
+        self._wet = True
         evap = sp.evap_mm_h / 3600.0 * max(self.track_temp - 5.0, 0.0) / 25.0 * (1 + 0.1 * w.wind_ms)
         decay = dt / sp.drain_tau
         self.water += rain * dt - self.water * decay
         self.water = np.maximum(self.water - evap * dt, 0.0)
         off = self._off_line
         self._off_line = max(off + rain * dt - off * decay - evap * dt, 0.0)
+        if rain <= 0 and self._off_line == 0.0 and not self.water.any():
+            self._wet = False  # dried out: skip the water arrays from now on
         # Rain washes rubber away.
         if rain > 0:
             self.rubber *= max(1 - sp.rubber_wash * rain * dt, 0.0)

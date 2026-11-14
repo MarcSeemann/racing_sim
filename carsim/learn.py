@@ -68,14 +68,19 @@ GRADE_AHEAD_M = (0, 60, 150)
 CONTROL_DT = 0.02  # the network decides 50 times a second; physics runs at 1 kHz
 PHYS_DT = 0.001
 RUNS_DIR = Path(os.environ.get("CARSIM_RUNS", "ai_runs"))
+# Bumped whenever the car's physics changes enough that old drivers/scores are not comparable:
+# a saved run with another version is archived (see _load_start). 2 = phase 13 limits, 3 = phase 14
+# suspension, kerbs, camber, LSD, ERS.
+PHYSICS_VERSION = 3
 
 # Observation layout, by name: a checkpoint saved with an older layout is mapped onto this one
 # (matching inputs keep their weights, new inputs start at zero, so the old driver drives the same).
 OBS_V1 = (["vx", "vy", "yaw_rate", "cross_track", "sin_heading_err", "cos_heading_err",
            "alpha_front", "alpha_rear", "kappa_rear", "steer"] + [f"curv_{d}" for d in LOOKAHEAD_M])
-OBS_NAMES = OBS_V1 + ["throttle", "brake", "kappa_front", "grip_front", "grip_rear",
+OBS_NAMES = (OBS_V1 + ["throttle", "brake", "kappa_front", "grip_front", "grip_rear",
                       "tyre_temp_front", "tyre_temp_rear", "brake_temp_front", "brake_temp_rear",
                       "fuel", "surface_grip"] + [f"grade_{d}" for d in GRADE_AHEAD_M] + ["crest_40"]
+             + ["body_roll", "body_pitch", "ride_front", "ers_soc"])
 
 
 # ---- the policy network --------------------------------------------------------------
@@ -176,6 +181,10 @@ def observe(car, track, i: int) -> np.ndarray:
             car.fuel / 100.0, (min(sg) - 1) * 3]
     obs += [float(track.grade[track.index_at(s_i + d)]) * 10 for d in GRADE_AHEAD_M]
     obs += [float(track.vert_curv[track.index_at(s_i + 40)]) * 1000]
+    # The body's motion through the seat, the floor's height, the battery.
+    e = car.p.ers
+    obs += [s.ph * 100.0, s.th * 200.0, (s.hf - 0.02) * 100.0,
+            (car.ers_energy / e.store - 0.5) * 2 if e.enabled else 0.0]
     return np.array(obs)
 
 
@@ -267,7 +276,7 @@ def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32,
         inp = Inputs(throttle=max(pedal, 0.0), brake=max(-pedal, 0.0), steer=steer, gear=auto_gear(s, car))
         before = s.steer
         for _ in range(n_sub):
-            car.step(inp, cfg.phys_dt)
+            car.step(inp, cfg.phys_dt, row=False)
         steer_travel += abs(s.steer - before)
         i = track.nearest(s.x, s.y, i)
         s_now = track.s[i]
@@ -410,6 +419,7 @@ def save_checkpoint(path: Path, theta, adam, gen, best, cfg, history):
     os.replace(path / "policy.tmp.npy", path / "policy.npy")  # the best driver so far (for drive / 3D)
     meta = asdict(cfg)
     meta["obs_names"] = OBS_NAMES
+    meta["physics_version"] = PHYSICS_VERSION
     (path / "config.json").write_text(json.dumps(meta, indent=1))
     with open(path / "progress.csv", "a") as fh:
         if fh.tell() == 0:
@@ -425,6 +435,14 @@ def _saved_obs_names(path: Path):
         except (ValueError, OSError):
             return None
     return None
+
+
+def _saved_physics_version(path: Path):
+    f = path / "config.json"
+    try:
+        return json.loads(f.read_text()).get("physics_version", 1) if f.exists() else None
+    except (ValueError, OSError):
+        return None
 
 
 def _archive_old_run(out: Path, log):
@@ -450,6 +468,7 @@ def _load_start(out: Path, cfg: TrainConfig, policy, adam, log, init_from: str |
         d = np.load(ck)
         names = _saved_obs_names(out)
         theta, migrated = adapt_theta(d["theta"], cfg.hidden, names)
+        migrated = migrated or _saved_physics_version(out) != PHYSICS_VERSION
         if not migrated:
             policy.theta, adam.m, adam.v, adam.t, gen = theta, d["m"], d["v"], int(d["t"]), int(d["gen"])
             best = {"theta": d["best_theta"], "fitness": float(d["best_fitness"])}
