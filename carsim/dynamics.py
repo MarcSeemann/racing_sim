@@ -235,6 +235,19 @@ class Car2D:
             s.zud = [x * 0.9 for x in s.zud]
         s.fz = self._tyre_spring(s.road, [0.0] * 4)
 
+    def place(self, track, s: float = 0.0, offset: float = 0.0):
+        """Put the car on a track at distance s along it, `offset` m left of the centreline (or of
+        the line given as `track`), pointing along it. Made-up circuits start at the origin
+        heading east (where a new car already is); real ones do not."""
+        i = track.index_at(s)
+        h = float(track.heading[i])
+        st = self.state
+        st.x = float(track.x[i]) - offset * math.sin(h)
+        st.y = float(track.y[i]) + offset * math.cos(h)
+        st.psi = h
+        if getattr(self, "cond", None) is not None:
+            self.cond.i = self.cond.track.index_at(s)
+
     def wheel_rpm_to_engine(self, v: float, gear: int) -> float:
         return v / self.p.chassis.wheel_radius * overall_ratio(self.p.gearbox, gear) / RPM_TO_RADS
 
@@ -403,7 +416,7 @@ class Car2D:
                 hint = (ic + int(round(ds_w / ds_mean))) % n_pts
                 surf_grip[i], depth[i], surf[i] = cond.wheel_surface(s_c + ds_w, off, self.compound, s.vx, hint)
                 if dynamic:
-                    road[i] = cond.road_height(s_c + ds_w, off)
+                    road[i] = cond.road_height(s_c + ds_w, off, False, hint)
             if dynamic:  # the floor runs down the middle of the car: asphalt only, never the kerb ridge
                 off_c = -(s.x - x_c) * sc + (s.y - y_c) * hc
                 ds_c = (s.x - x_c) * hc + (s.y - y_c) * sc

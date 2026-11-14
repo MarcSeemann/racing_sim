@@ -9,6 +9,7 @@ venv/
 # generated outputs
 *.csv
 !tracks/*.csv
+!carsim/data/tracks/*.csv
 /out/
 *.html
 !docs/**/*.html

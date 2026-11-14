@@ -117,6 +117,43 @@ Cost: the three laps plus three 500 m practice runs are about 110 s of simulated
 perturbation once the driver is quick; the physics runs at 1 kHz at roughly 3–4x real time per
 core, so a population of 64 takes about 30–60 s a generation on 64 cores (`--workers`).
 
+### One driver for every circuit
+
+Trained on one track, the driver memorises that lap. Trained with `--track random`, it practises
+on two brand-new random circuits every generation (`carsim/trackgen.py`: straights and corners
+from 15 m hairpins to 300 m sweepers, chicanes, 2.5–6 km, 11–16 m wide, either direction), so it
+has to learn to drive rather than learn a lap. Four held-out random circuits that it never trains
+on pick the best driver, and Monza, which it never sees at all, is the exam:
+
+    python -m carsim.learn train --track random --init-from short --hours 8   # head start from your short-track driver
+    python analysis/learning_report.py random                                 # held-out progress + Monza
+    python -m carsim.learn drive --policy random --track monza                # one lap of Monza
+    python drive3d.py --track monza --learned --policy random                 # watch it in 3D
+
+`--init-from short` copies the short-circuit driver into the new run (its two new inputs, the
+distances to each track edge, start with zero weight, so it drives exactly as before on day one).
+Runs from before this change keep working: the saved network's size tells which inputs it uses.
+
+## Circuits
+
+Use these names with `--track` anywhere:
+
+    short, test, hill              made-up circuits (1.1 km, 2.5 km, 2.5 km with 23 m of elevation)
+    monza                          Autodromo Nazionale Monza, 5.79 km, real centreline and widths
+    random:<seed>                  a random circuit, the same one for the same seed
+
+Track width can vary round the lap, and differently on each side of the centreline
+(`Track.width_left`, `Track.width_right`). Monza comes from the
+[TUM racetrack database](https://github.com/TUMFTM/racetrack-database) (LGPL-3.0, see
+`carsim/data/tracks/`): centreline from OpenStreetMap, widths between the white lines from
+satellite images (about 9.4 m on average), no elevation.
+
+![Monza and random circuits](docs/images/circuits_report.png)
+
+The car on real circuits is `f1_2025()`: built to the 2025 F1 rules (800 kg with driver,
+3.60 m wheelbase, 2.0 m wide, 18-inch wheels), with a choice of wing (`downforce="low"` for
+Monza, `"medium"`, `"high"`). `race_car()` is this car plus fuel.
+
 `python -m carsim presets` lists the ready-made studies: hot-day, downforce, balance, weight,
 tyres and track. Changes are `path=value`, `path=+delta` or `path=*factor`, where the path starts
 with `car.` (any car parameter), `weather.`, `surface.` or `scenario.`.
@@ -144,7 +181,13 @@ with `car.` (any car parameter), `weather.`, `surface.` or `scenario.`.
 ### Your own circuit
 
     from carsim.track import Track
-    tr = Track.from_csv("my_track.csv")  # columns x, y, z in metres along the centreline
+    tr = Track.from_csv("my_track.csv")  # columns x, y and optionally z, width_left, width_right (m)
+
+    from carsim.circuits import load_tum_csv   # any track from the TUM racetrack database
+    tr = load_tum_csv("Spa.csv", "Spa")
+
+    from carsim.trackgen import random_track
+    tr = random_track(42, elevation=15.0)      # a random circuit with up to 15 m of elevation
 
 ## Results
 
@@ -174,14 +217,17 @@ More reports (each made by a script in `analysis/`):
 ## Project layout
 
     carsim/
-      params.py        car and environment parameters (generic single-seater values); race_car()
+      params.py        car and environment parameters; f1_2025() (2025 rules), race_car()
       powertrain.py    engine, gearbox
       tyres.py         Magic Formula, combined slip, load sensitivity
       aero.py          ride-height aero map, DRS, heave ride heights
       thermal.py       tyre temperature, pressure, wear
       vehicle.py       straight-line model (phases 1–3)
       dynamics.py      four-wheel model: everything above plus track, weather and fuel
-      track.py         circuits: from segments, points or CSV; elevation; surfaces
+      track.py         circuits: from segments, points or CSV; elevation; varying width; surfaces
+      circuits.py      every circuit by name (short, test, hill, monza, random:<seed>)
+      trackgen.py      random circuit generator
+      data/tracks/     surveyed circuit data (Monza)
       conditions.py    weather timeline, water, rubber, track temperature, tyre compounds
       drivers.py       scripted drivers and the AI LapDriver
       racing_line.py   minimum-curvature line
@@ -197,7 +243,7 @@ More reports (each made by a script in `analysis/`):
     godot/             Godot 4 project: 3D track, car, cameras, HUD, rain (main.gd)
     play.py            real-time top-down view (pygame)
     analysis/          report scripts (PNG charts)
-    tests/             99 tests, each checking a known answer (~8 min)
+    tests/             132 tests, each checking a known answer (~11 min)
 
 ## Tests
 
@@ -218,6 +264,7 @@ input replay and more. GitHub Actions runs them on every push (`.github/workflow
 | 10 Fuel and mass · 11 Racing line and live driver input | done |
 | 12 What-if studies, lap viewer, playable view | done |
 | 3D front end in Godot (physics in Python) | first version |
+| Varying track width, random circuits, Monza, 2025-spec car, AI trained on any circuit | done |
 
 Ideas for what's next: a better car model and sound in 3D, force feedback for steering wheels, pit stops
 and race strategy, suspension pitch and roll dynamics (porpoising), a minimum-lap-time racing line,
@@ -225,13 +272,15 @@ multiple cars and slipstream.
 
 ## Known simplifications
 
-- Parameters are generic and plausible, not taken from any real car or tyre.
+- Parameters are generic and plausible, not taken from any real car or tyre; `f1_2025()` sizes
+  the car to the 2025 rules, but its aero, tyre and power figures are estimates.
 - Suspension is quasi-static load transfer with a 20 ms lag; no pitch/roll dynamics or porpoising.
 - The racing line minimises curvature, a geometric approximation of the fastest line.
 - The AI driver keeps a safety margin (more in the wet), so its lap times are conservative.
 - Water and rubber are tracked along the lap in 5 m bins on the racing line, plus one level off the line.
 - Wind blows from one direction for the whole lap (a headwind on one straight is a tailwind on the other).
-- Default cars carry no fuel; `race_car()` sets a 798 kg car plus fuel.
+- Default cars carry no fuel; `race_car()` sets the 800 kg 2025-spec car plus fuel.
+- Monza is flat here (the data has no elevation) and its widths come from satellite images.
 - No pit stops or tyre changes mid-run.
 - The 3D car is built from simple shapes, there is no sound yet, and the body's roll is a visual
   approximation (the physics has no roll motion).

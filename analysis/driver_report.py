@@ -43,9 +43,8 @@ def main(out="driver_report.png"):
                  x=0.04, ha="left", fontsize=13, color=INK, fontweight="bold")
 
     ax = axes[0]
-    half = tr.width / 2
-    for sign in (1, -1):
-        ax.plot(tr.x - sign * half * np.sin(tr.heading), tr.y + sign * half * np.cos(tr.heading), color=MUTED, lw=1)
+    for w in (tr.width_left, -tr.width_right):
+        ax.plot(tr.x - w * np.sin(tr.heading), tr.y + w * np.cos(tr.heading), color=MUTED, lw=1)
     ax.plot(tr.x, tr.y, color=ORANGE, lw=1.2, ls="--", label="Centreline")
     ax.plot(path.x, path.y, color=BLUE, lw=2, label="Racing line")
     ax.set_xlim(220, 760)

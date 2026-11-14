@@ -172,9 +172,9 @@ class Conditions:
         """(grip factor, water depth mm, surface name) for a wheel at s along the lap, lateral offset.
         i_hint: the centreline index at s_wheel if the caller knows it (saves a search)."""
         b = self.bin_of(s_wheel)
-        surf = self.track.surface_at(offset)
-        j = self.track.index_at(s_wheel) if i_hint is None else i_hint
-        on_line = abs(offset - self.line_offset[j]) <= self.sp.line_width
+        iw = self.track.index_at(s_wheel) if i_hint is None else i_hint
+        surf = self.track.surface_at(offset, iw)  # the local edges: width varies round the lap
+        on_line = abs(offset - self.line_offset[iw]) <= self.sp.line_width
         depth = self.water[b] if on_line else max(self.water[b], self._off_line)
         grip = wet_grip(compound, depth, speed)
         if surf == "track":
@@ -186,15 +186,18 @@ class Conditions:
             grip *= self.sp.grass_grip
         return grip, depth, surf
 
-    def road_height(self, s_wheel: float, offset: float, asphalt_only: bool = False) -> float:
+    def road_height(self, s_wheel: float, offset: float, asphalt_only: bool = False, i=None) -> float:
         """Height of the surface under a wheel (m): asphalt waves, kerb ridge and serrations, grass bumps.
-        asphalt_only: just the asphalt waves (what the floor sees down the middle of the car)."""
+        asphalt_only: just the asphalt waves (what the floor sees down the middle of the car).
+        i: centreline index at s_wheel (for the local track edges), if known."""
         sp, tr = self.sp, self.track
         tau = 2 * math.pi
         h = sp.roughness * (0.5 * math.sin(tau * s_wheel / 7.3) + 0.3 * math.sin(tau * s_wheel / 2.9 + 1.3)
                             + 0.2 * math.sin(tau * s_wheel / 1.1 + 0.7 * offset))
-        a = abs(offset) - tr.width / 2
-        if a > 0 and not asphalt_only:
+        if asphalt_only:
+            return h
+        a = tr.edge_beyond(i if i is not None else tr.index_at(s_wheel), offset)
+        if a > 0:
             if a <= tr.kerb_width:
                 h += sp.kerb_height * math.sin(math.pi * a / tr.kerb_width) * (0.7 + 0.3 * math.sin(tau * s_wheel / sp.kerb_period))
             else:

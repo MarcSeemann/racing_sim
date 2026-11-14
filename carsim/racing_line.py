@@ -34,14 +34,20 @@ def min_curvature_offsets(track: Track, margin: float = 1.5, step: int = 4) -> n
         for j, w in ((im, 1.0), (i, -2.0), (ip, 1.0)):
             A[2 * i, j] += w * nx[j]
             A[2 * i + 1, j] += w * ny[j]
-    half = track.width / 2 - margin
-    res = lsq_linear(A.tocsr(), b, bounds=(-half, half), method="trf", lsmr_tol="auto", max_iter=500)
+    # Per-sample limits: the track can be wider on one side of its centreline than the other.
+    lo_full = -(track.width_right - margin)
+    hi_full = track.width_left - margin
+    lo, hi = lo_full[idx], hi_full[idx]
+    bad = lo >= hi  # narrower than twice the margin: stay on the middle of the tarmac
+    mid = (hi + lo) / 2
+    lo, hi = np.where(bad, mid - 1e-3, lo), np.where(bad, mid + 1e-3, hi)
+    res = lsq_linear(A.tocsr(), b, bounds=(lo, hi), method="trf", lsmr_tol="auto", max_iter=500)
     # Back to full resolution (periodic interpolation), lightly smoothed.
     s_c = track.s[idx]
     n_full = np.interp(track.s, np.append(s_c, track.length), np.append(res.x, res.x[0]))
     k = np.ones(5) / 5
     n_full = np.convolve(np.concatenate([n_full[-5:], n_full, n_full[:5]]), k, "same")[5:-5]
-    return np.clip(n_full, -half, half)
+    return np.clip(n_full, np.minimum(lo_full, hi_full), np.maximum(lo_full, hi_full))
 
 
 def racing_line(track: Track, margin: float = 1.5, step: int = 4):
@@ -49,7 +55,8 @@ def racing_line(track: Track, margin: float = 1.5, step: int = 4):
     n = min_curvature_offsets(track, margin, step)
     x = track.x - n * np.sin(track.heading)
     y = track.y + n * np.cos(track.heading)
-    line = Track.from_samples(f"{track.name} racing line", x, y, track.z, track.width)
+    line = Track.from_samples(f"{track.name} racing line", x, y, track.z, track.width,
+                              width_left=track.width_left - n, width_right=track.width_right + n)
     return line, n
 
 

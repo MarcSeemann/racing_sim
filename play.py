@@ -24,11 +24,9 @@ from carsim.conditions import Conditions, Weather  # noqa: E402
 from carsim.drivers import LapDriver  # noqa: E402
 from carsim.compare import LiveDelta  # noqa: E402
 from carsim.inputs import DeviceState, HumanDriver, Recorder  # noqa: E402
-from carsim.track import hill_circuit, short_circuit  # noqa: E402
-from carsim.track import test_circuit as long_circuit  # noqa: E402
+from carsim.circuits import TRACKS, track_arg  # noqa: E402
 
 DT = 0.001
-TRACKS = {"short": short_circuit, "test": long_circuit, "hill": hill_circuit}
 WEATHER = {"dry": lambda: Weather.dry(), "shower": lambda: Weather.shower(start=60, peak=180, end=360),
            "wet": lambda: Weather.constant(rain_mm_h=6.0, cloud=1.0, air_temp_c=16.0)}
 
@@ -70,7 +68,7 @@ class KeyboardPad:
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--track", choices=TRACKS, default="short")
+    ap.add_argument("--track", type=track_arg, default="short", help="short, test, hill, monza or random:<seed>")
     ap.add_argument("--weather", choices=WEATHER, default="dry")
     ap.add_argument("--compound", default="slick", choices=("slick", "intermediate", "wet"))
     ap.add_argument("--fuel", type=float, default=30.0)
@@ -93,15 +91,18 @@ def main(argv=None):
     car = Car2D(race_car(a.fuel), conditions=cond, compound=a.compound)
     car.set_speed(25.0)
     lap_driver = LapDriver(track, line="racing")  # also does lap timing in manual mode
+    car.place(lap_driver.path)
     pad = KeyboardPad(pygame)
     driver = lap_driver if a.demo else HumanDriver(pad)
     if a.record:
         driver = Recorder(driver)
 
     # Track edges for drawing.
-    half = track.width / 2
-    left = [(x - half * math.sin(h), y + half * math.cos(h)) for x, y, h in zip(track.x, track.y, track.heading)]
-    right = [(x + half * math.sin(h), y - half * math.cos(h)) for x, y, h in zip(track.x, track.y, track.heading)]
+    edge = zip(track.x, track.y, track.heading, track.width_left, track.width_right)
+    left, right = [], []
+    for x, y, h, wl, wr in edge:
+        left.append((x - wl * math.sin(h), y + wl * math.cos(h)))
+        right.append((x + wr * math.sin(h), y - wr * math.cos(h)))
     line = list(zip(lap_driver.path.x, lap_driver.path.y))
     scale = 5.0  # px per m
     live = LiveDelta(track)
