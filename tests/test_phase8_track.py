@@ -12,6 +12,7 @@ from carsim.track import Track, hill_circuit, short_circuit
 from carsim.track import test_circuit as make_circuit
 
 NO_THERMALS = CarParams(tyre_thermals=False)
+NO_THERMALS.ers.enabled = False  # constant car: lap-to-lap changes come from the track only
 
 
 # ---- geometry ----------------------------------------------------------------

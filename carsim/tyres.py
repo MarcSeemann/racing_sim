@@ -97,3 +97,47 @@ def combined(p: TyreParams, kappa: float, alpha: float, fz: float, scale: float 
 
 def dfx_dkappa(p: TyreParams, kappa: float, fz: float, eps: float = 1e-4) -> float:
     return (fx_pure(p, kappa + eps, fz) - fx_pure(p, kappa - eps, fz)) / (2 * eps)
+
+
+# ---- fast path for the vehicle model (phase 14) ---------------------------------------------
+class TyreConsts:
+    """Per-step constants of a TyreParams (so the hot loop reads plain floats)."""
+    __slots__ = ("kp", "Bx", "Cx", "Ex", "mux", "tap", "By", "Cy", "Ey", "muy", "fz0", "ls", "gs")
+
+    def __init__(self, p: TyreParams):
+        lo, la = p.longitudinal, p.lateral
+        self.kp, self.Bx, self.Cx, self.Ex, self.mux = lo.peak_slip, lo.B, lo.C, lo.E, lo.mu0
+        self.tap, self.By, self.Cy, self.Ey, self.muy = math.tan(la.peak_slip), la.B, la.C, la.E, la.mu0
+        self.fz0, self.ls, self.gs = p.nominal_load, p.load_sensitivity, p.grip_scale
+
+
+def _mf_and_slope(x, B, C, D, E):
+    """Magic formula value and its derivative dF/dx."""
+    bx = B * x
+    at = math.atan(bx)
+    phi = bx - E * (bx - at)
+    ca = C * math.atan(phi)
+    dphi = B * (1 - E + E / (1 + bx * bx))
+    return D * math.sin(ca), D * math.cos(ca) * C / (1 + phi * phi) * dphi
+
+
+def combined_fast(t: TyreConsts, kappa: float, alpha: float, fz: float, scale_x: float = 1.0,
+                  scale_y: float = 1.0):
+    """(Fx, Fy, dFx/dkappa) in one pass — same model as combined(), with separate grip scales
+    for the two directions (camber helps cornering but costs braking/traction patch)."""
+    if fz <= 0:
+        return 0.0, 0.0, 0.0
+    load = max(1 + t.ls * (fz - t.fz0) / t.fz0, 0.5) * t.gs * fz
+    dx = t.mux * load * scale_x
+    dy = t.muy * load * scale_y
+    sx = kappa / t.kp
+    sy = math.tan(alpha) / t.tap
+    rho = math.hypot(sx, sy)
+    if rho < 1e-9:
+        return 0.0, 0.0, _mf_and_slope(0.0, t.Bx, t.Cx, dx, t.Ex)[1]
+    F, dF = _mf_and_slope(rho * t.kp, t.Bx, t.Cx, dx, t.Ex)
+    fx = F * sx / rho
+    fy = magic_formula(math.atan(rho * t.tap), t.By, t.Cy, dy, t.Ey) * sy / rho
+    cx, cy = sx * sx / (rho * rho), sy * sy / (rho * rho)
+    slope = dF * cx + F / (t.kp * rho) * cy
+    return fx, fy, slope
