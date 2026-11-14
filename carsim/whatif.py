@@ -28,10 +28,7 @@ from .dynamics import Car2D
 from .drivers import LapDriver
 from .params import CarParams, race_car
 from .sim import run_laps
-from .track import hill_circuit, short_circuit
-from .track import test_circuit as long_circuit
-
-TRACKS = {"short": short_circuit, "test": long_circuit, "hill": hill_circuit}
+from .circuits import TRACKS
 
 
 @dataclass
@@ -40,7 +37,7 @@ class Scenario:
     laps: int = 3  # the last lap is the one compared
     line: str = "racing"
     compound: str = "slick"
-    fuel_kg: float = 0.0  # > 0 uses race_car(): 798 kg + fuel
+    fuel_kg: float = 0.0  # > 0 uses race_car(): 800 kg (2025 minimum) + fuel
     tyre_thermals: bool = True
     rubber: float = 1e9  # J per bin: 1e9 = fully rubbered (no track evolution)
     water_mm: float = 0.0
@@ -97,6 +94,7 @@ def run_scenario(sc: Scenario) -> dict:
     car = Car2D(params, conditions=cond, compound=sc.compound)
     car.set_speed(30.0)
     driver = LapDriver(tr, line=sc.line)
+    car.place(driver.path)
     log, laps = run_laps(car, driver, sc.laps, log_every=10)
     if driver.off_track or len(laps) < sc.laps:
         return {"lap_time": math.nan, "off_track": True}

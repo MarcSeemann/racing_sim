@@ -1,6 +1,7 @@
 """Car and environment parameters.
 
-Generic, plausible values for a modern single-seater (F1-style) race car.
+Generic, plausible values for a modern single-seater (F1-style) race car; `f1_2025()` sizes
+it to the 2025 F1 rules (mass, wheelbase, width, wheels).
 All units SI: kg, m, s, N, W, rad. Engine speeds are given in rpm for readability.
 """
 from dataclasses import dataclass, field
@@ -235,9 +236,40 @@ class CarParams:
     tyre_thermals: bool = True  # False = tyres always at optimum, never wear
 
 
-def race_car(fuel_kg: float = 100.0, **kw) -> CarParams:
-    """Race-weekend setup: 798 kg car with driver (minimum weight) plus fuel."""
+# 2025 F1 technical regulations (the last year of the 2022-2025 rules). Hard limits from the
+# rules; the rest are typical values for a car built to them.
+F1_2025 = {
+    "min_mass_kg": 800.0,  # car + driver (driver and seat at least 80 kg), no fuel; 798 kg in 2023-24
+    "max_wheelbase_m": 3.60,
+    "max_width_m": 2.00,
+    "wheel_rim_in": 18,
+    "tyre_diameter_m": (0.720, 0.725),  # front, rear (Pirelli 18-inch)
+    "tyre_width_m": (0.305, 0.405),  # front, rear tread width, roughly
+    "max_fuel_kg": 110.0,
+}
+
+# Downforce trims: (ClA, CdA, front balance). Estimates for a 2022-2025 car: "low" is a Monza
+# wing, "high" a Monaco/Hungary wing; "medium" is the generic car of the earlier phases.
+TRIMS = {"low": (3.2, 0.85, 0.41), "medium": (4.0, 1.10, 0.42), "high": (4.7, 1.30, 0.43)}
+
+
+def f1_2025(fuel_kg: float = 0.0, downforce: str = "medium", **kw) -> CarParams:
+    """A car built to the 2025 F1 rules: 800 kg with driver, 3.60 m wheelbase, 2.0 m wide on
+    18-inch wheels (track = overall width less a tyre width, at each axle), plus fuel.
+    `downforce` picks the wing trim: "low" (Monza), "medium", "high"."""
     p = CarParams(**kw)
-    p.chassis.mass = 798.0
+    c, r = p.chassis, F1_2025
+    c.mass = r["min_mass_kg"]
+    c.wheelbase = r["max_wheelbase_m"]
+    c.wheel_radius = sum(r["tyre_diameter_m"]) / 4
+    c.track_front = r["max_width_m"] - r["tyre_width_m"][0]  # 1.695 m
+    c.track_rear = r["max_width_m"] - r["tyre_width_m"][1]  # 1.595 m
+    p.fuel.capacity_kg = r["max_fuel_kg"]
     p.fuel.start_kg = fuel_kg
+    p.aero.ClA, p.aero.CdA, p.aero.front_balance = TRIMS[downforce]
     return p
+
+
+def race_car(fuel_kg: float = 100.0, **kw) -> CarParams:
+    """Race-weekend setup: the 2025-spec car (800 kg with driver, minimum weight) plus fuel."""
+    return f1_2025(fuel_kg, **kw)

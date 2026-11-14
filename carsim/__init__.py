@@ -1,4 +1,4 @@
-from .params import CarParams, Environment, race_car
+from .params import CarParams, Environment, f1_2025, race_car
 from .vehicle import Inputs, LongitudinalCar
 from .sim import run
 from .dynamics import Car2D

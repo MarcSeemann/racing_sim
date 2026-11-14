@@ -126,6 +126,15 @@ func _build_track() -> void:
 	var n := xs.size()
 	var half: float = track["width"] / 2.0
 	var kerb: float = track["kerb"]
+	# Track edges per point (older servers send one width for the whole lap).
+	var wl: Array = track.get("width_left", [])
+	var wr: Array = track.get("width_right", [])
+	if wl.size() != n:
+		wl = []
+		wr = []
+		for i in n:
+			wl.append(half)
+			wr.append(half)
 	# Corners: where the heading changes quickly (kerbs go there).
 	var corner := []
 	corner.resize(n)
@@ -133,11 +142,12 @@ func _build_track() -> void:
 		var dh: float = wrapf(float(hs[(i + 4) % n]) - float(hs[(i - 4 + n) % n]), -PI, PI)
 		corner[i] = abs(dh) / 8.0 > 1.0 / 350.0
 	var bands := [
-		# [offset from, offset to, kind]
-		[-half, half, "asphalt"],
-		[half, half + kerb, "kerb_l"], [-half - kerb, -half, "kerb_r"],
-		[half, half + 45.0, "grass"], [-half - 45.0, -half, "grass"],
-		[half - 0.35, half - 0.15, "line"], [-half + 0.15, -half + 0.35, "line"],
+		# [from, to, kind]; each end is [side, extra]: side +1 = left edge (offset wl + extra),
+		# -1 = right edge (offset -(wr + extra)).
+		[[-1, 0.0], [1, 0.0], "asphalt"],
+		[[1, 0.0], [1, kerb], "kerb_l"], [[-1, kerb], [-1, 0.0], "kerb_r"],
+		[[1, 0.0], [1, 45.0], "grass"], [[-1, 45.0], [-1, 0.0], "grass"],
+		[[1, -0.35], [1, -0.15], "line"], [[-1, -0.15], [-1, -0.35], "line"],
 	]
 	asphalt = _mat(Color(0.16, 0.16, 0.17), 0.95)
 	asphalt.metallic_specular = 0.2
@@ -163,10 +173,10 @@ func _build_track() -> void:
 			var j := (i + 1) % n
 			if kind.begins_with("kerb") and not (corner[i] and corner[j]):
 				continue
-			var a0 := _edge(xs, ys, zs, hs, i, band[0], lift)
-			var a1 := _edge(xs, ys, zs, hs, i, band[1], lift)
-			var b0 := _edge(xs, ys, zs, hs, j, band[0], lift)
-			var b1 := _edge(xs, ys, zs, hs, j, band[1], lift)
+			var a0 := _edge(xs, ys, zs, hs, i, _band_offset(band[0], wl, wr, i), lift)
+			var a1 := _edge(xs, ys, zs, hs, i, _band_offset(band[1], wl, wr, i), lift)
+			var b0 := _edge(xs, ys, zs, hs, j, _band_offset(band[0], wl, wr, j), lift)
+			var b1 := _edge(xs, ys, zs, hs, j, _band_offset(band[1], wl, wr, j), lift)
 			if kind.begins_with("kerb"):
 				var c := Color(0.85, 0.1, 0.1) if (i / 3) % 2 == 0 else Color(0.95, 0.95, 0.95)
 				st.set_color(c)
@@ -181,20 +191,25 @@ func _build_track() -> void:
 	# Start / finish line.
 	var sf := MeshInstance3D.new()
 	var bm := BoxMesh.new()
-	bm.size = Vector3(track["width"], 0.02, 1.2)
+	bm.size = Vector3(float(wl[0]) + float(wr[0]), 0.02, 1.2)
 	sf.mesh = bm
 	sf.material_override = _mat(Color(0.95, 0.95, 0.95), 0.5)
 	add_child(sf)
-	sf.position = sim_to_godot(xs[0], ys[0], zs[0]) + Vector3(0, 0.02, 0)
+	sf.position = _edge(xs, ys, zs, hs, 0, (float(wl[0]) - float(wr[0])) / 2.0, 0.02)
 	sf.rotation.y = float(hs[0]) - PI / 2
 	# Ground far below the lowest point, so the horizon is not empty.
 	var ground := MeshInstance3D.new()
 	var pm := PlaneMesh.new()
-	pm.size = Vector2(6000, 6000)
+	var x_lo: float = xs.min()
+	var x_hi: float = xs.max()
+	var y_lo: float = ys.min()
+	var y_hi: float = ys.max()
+	var span: float = max(x_hi - x_lo, y_hi - y_lo) + 4000.0  # big circuits (Monza ~2 km across) need more
+	pm.size = Vector2(span, span)
 	ground.mesh = pm
 	ground.material_override = _mat(Color(0.11, 0.24, 0.09), 1.0)
 	add_child(ground)
-	ground.position = Vector3(0, float(zs.min()) - 1.5, 0)
+	ground.position = sim_to_godot((x_lo + x_hi) / 2.0, (y_lo + y_hi) / 2.0, float(zs.min()) - 1.5)
 	# Racing line (toggle with L).
 	var lst := SurfaceTool.new()
 	lst.begin(Mesh.PRIMITIVE_LINE_STRIP)
@@ -212,7 +227,12 @@ func _build_track() -> void:
 	add_child(line_mesh)
 	# TV camera spots: every ~250 m, set back from the outside of the track.
 	for i in range(0, n, 250):
-		tv_points.append(_edge(xs, ys, zs, hs, i, -(half + 25.0), 8.0))
+		tv_points.append(_edge(xs, ys, zs, hs, i, -(float(wr[i]) + 25.0), 8.0))
+
+func _band_offset(spec: Array, wl: Array, wr: Array, i: int) -> float:
+	if int(spec[0]) > 0:
+		return float(wl[i]) + float(spec[1])
+	return -(float(wr[i]) + float(spec[1]))
 
 func _edge(xs: Array, ys: Array, zs: Array, hs: Array, i: int, offset: float, lift: float) -> Vector3:
 	var h: float = hs[i]

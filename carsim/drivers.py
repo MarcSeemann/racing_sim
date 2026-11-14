@@ -288,7 +288,7 @@ class LapDriver:
             self.lap_start = s.t
         self._last_s = s_now
         err = tr.cross_track_error(self.i, s.x, s.y)  # to the line being driven
-        if abs(self.track.cross_track_error(self.i, s.x, s.y)) > self.track.width / 2 + 2:
+        if self.track.off_track(self.i, self.track.cross_track_error(self.i, s.x, s.y), 2.0):
             self.off_track = True
 
         # Steering: pure pursuit to a point ahead on the centreline.
