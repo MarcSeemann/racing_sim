@@ -60,12 +60,14 @@ def racing_line(track: Track, margin: float = 1.5, step: int = 4):
     return line, n
 
 
-_CACHE: dict = {}
 
 
-def cached_racing_line(track: Track, margin: float = 1.5):
-    """racing_line(), computed once per track object."""
-    key = (id(track), margin)
-    if key not in _CACHE:
-        _CACHE[key] = racing_line(track, margin)
-    return _CACHE[key]
+def cached_racing_line(track: Track, margin: float = 1.5, step: int = 4):
+    """racing_line(), computed once per track object and kept ON that object, so it is freed with
+    the track (training on random circuits makes thousands of tracks; a global cache keyed by id()
+    grew without bound, and a new track could even reuse a freed track's id)."""
+    cache = track.__dict__.setdefault("_racing_lines", {})
+    key = (margin, step)
+    if key not in cache:
+        cache[key] = racing_line(track, margin, step)
+    return cache[key]

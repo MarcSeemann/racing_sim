@@ -77,6 +77,7 @@ RUNS_DIR = Path(os.environ.get("CARSIM_RUNS", "ai_runs"))
 # a saved run with another version is archived (see _load_start). 2 = phase 13 limits, 3 = phase 14
 # suspension, kerbs, camber, LSD, ERS.
 PHYSICS_VERSION = 3
+RUBBER_LINE_STEP = 16  # racing-line resolution (samples) used to place the rubber in training
 
 # Observation layout, by name: a checkpoint saved with an older layout is mapped onto this one
 # (matching inputs keep their weights, new inputs start at zero, so the old driver drives the same).
@@ -234,7 +235,9 @@ def make_car(track, cfg: EpisodeConfig, i: int = 0):
     if not cfg.realistic:
         return Car2D(CarParams(tyre_thermals=False))
     cond = Conditions(track, Weather.dry(), cars_on_track=20, rubber=cfg.rubber)
-    cond.set_racing_line(cached_racing_line(track)[1])  # the field has rubbered in the racing line
+    # The field has rubbered in the racing line. A coarse solve is plenty for where the rubber lies
+    # (+-3 m band; ~0.4 m from the fine line) and ~20x quicker: random circuits need a new one each time.
+    cond.set_racing_line(cached_racing_line(track, step=RUBBER_LINE_STEP)[1])
     cond.i = i  # where the car starts (the surface lookup searches near the last position)
     car = Car2D(race_car(cfg.fuel_kg, downforce=cfg.downforce), conditions=cond)
     if cfg.tyre_temp is not None:
