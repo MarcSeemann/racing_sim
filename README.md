@@ -215,4 +215,6 @@ multiple cars and slipstream.
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE).
+Copyright (c) 2026 Marc Seemann. All rights reserved. This is proprietary software: you may view
+it and run it for personal, non-commercial evaluation, but copying, modifying, redistributing or
+commercial use needs written permission. See [LICENSE](LICENSE).
