@@ -16,7 +16,8 @@ line are all modelled and can be switched on, changed and compared.
 | Powertrain | Torque curve, 8-speed gearbox, clutch slip at launch, engine braking, traction control, air-density power loss |
 | Tyres | Pacejka "Magic Formula", combined slip (friction ellipse), load sensitivity, spinning wheels with lock-up and wheelspin |
 | Chassis | Four-wheel planar model: steering, yaw, longitudinal and lateral load transfer, roll-stiffness split, limited-slip diff |
-| Brakes | Brake bias, lock-up, rear-bias spin |
+| Control limits | Steering rate limit at the rack (slower at speed, as the tyres load up), throttle and brake-pressure build-up rates, tyre relaxation length (lateral force lags the slip angle), gearbox refuses over-revving downshifts. They live in the car, so every driver — you, the scripted AI and the learned AI — gets the same limits |
+| Brakes | Brake bias, lock-up, rear-bias spin; carbon disc temperature per corner (little bite cold, fade above ~1000 °C, cooled through the ducts) |
 | Aerodynamics | Downforce and drag vs ride height (ground effect, floor stall), aero balance shift, induced drag, DRS |
 | Tyre thermals | Surface and core temperature, hot pressure, wear with a cliff, grip window, water cooling |
 | Track | Elevation, crests and compressions, kerbs and grass, rubbering-in, layouts from coordinates |
@@ -78,21 +79,41 @@ from the same centreline the physics uses, so hills and corners match exactly.
 
 `carsim/learn.py` trains a small neural-network driver from scratch with evolution strategies
 (numpy only, no deep-learning library). It sees what a driver feels and sees (speed, sliding,
-position across the track, how the road curves ahead) and outputs steering and one pedal.
-It starts out knowing nothing and gets better every generation: each round it tries many slightly
-varied versions of itself from random places on the lap and keeps whatever gets further
-without leaving the track.
+position across the track, how the road curves and climbs ahead, tyre grip and temperature,
+brake temperature, fuel, kerbs and grass under the wheels) and outputs a steering target and
+one pedal. It starts out knowing nothing and gets better every generation: each round it tries
+many slightly varied versions of itself and keeps whatever gets further without leaving the track.
+
+It trains on **the same car you watch in 3D**: race car with fuel, tyre temperatures and wear,
+carbon brakes, kerbs and grass, a rubbered racing line, and the physical control limits (it
+cannot flick the steering from lock to lock, it has to wait for brake pressure to build). Each
+generation it drives **three laps from the line** (laps 2 and 3 start with different momentum and
+warmer tyres than lap 1), plus short practice runs from random places, speeds, tyre and brake
+temperatures and fuel loads, half of them on the approach to a corner.
 
     python -m carsim.learn train --track short                     # uses all CPU cores; Ctrl+C any time
-    nohup python -m carsim.learn train --track test --hours 4 > train.log 2>&1 &   # in the background
+    nohup python -m carsim.learn train --track short --hours 12 --population 64 > train.log 2>&1 &
     python -m carsim.learn status --track short                    # progress so far
-    python -m carsim.learn drive --track short                     # one lap with the best driver so far
+    python -m carsim.learn drive --track short                     # three laps with the best driver so far
     python drive3d.py --track short --learned                      # watch it in 3D
 
-Training saves after every generation to `ai_runs/<track>/` and resumes where it stopped. The 3D
-view reloads the newest saved driver at the end of each lap, so you can watch it improve while it
-trains. Expect the first laps after a few hundred generations: the hairpin is the first big wall
-(it has to discover braking), then it gets faster lap by lap.
+Training saves after every generation to `ai_runs/<track>/` and resumes where it stopped. A run
+saved with older physics (before the control limits) is moved to `ai_runs/<track>/legacy_<n>/` and
+training starts fresh; `--carry-over` keeps the old weights instead (inputs that existed keep their
+weights, new inputs start at zero). `--laps N` changes the number of laps, `--legacy-car` trains on
+the old simplified car. The 3D view reloads the newest saved driver at the end of each lap, so you
+can watch it improve while it trains.
+
+**Several tracks.** One driver can learn several circuits: practice runs are spread over the
+tracks and the test drives every one of them. It is best to get it good on one track first, then
+start the multi-track run from that driver:
+
+    python -m carsim.learn train --tracks short,test,hill --init-from short --population 64
+    python drive3d.py --track hill --learned --run multi_short-test-hill
+
+Cost: the three laps plus three 500 m practice runs are about 110 s of simulated driving per
+perturbation once the driver is quick; the physics runs at 1 kHz at roughly 3–4x real time per
+core, so a population of 64 takes about 30–60 s a generation on 64 cores (`--workers`).
 
 `python -m carsim presets` lists the ready-made studies: hot-day, downforce, balance, weight,
 tyres and track. Changes are `path=value`, `path=+delta` or `path=*factor`, where the path starts

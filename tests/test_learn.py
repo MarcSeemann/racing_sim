@@ -88,3 +88,89 @@ def test_time_bonus_only_when_the_distance_is_reached():
     f_bonus, _ = run_episode(zero, EpisodeConfig(**kw, time_bonus=10.0, ref_speed=10.0))
     assert f_bonus == pytest.approx(f_plain + 10.0 * max(0.0, 60.0 / 10.0 - i["time"]))
     assert f_bonus > f_plain
+
+
+# ---- phase 13: realistic training car, 3 laps, migration, several tracks ---------------------
+def test_training_car_is_the_3d_car():
+    from carsim.learn import make_car
+    tr = learn.TRACKS["short"]()
+    car = make_car(tr, EpisodeConfig(track="short"), i=500)
+    assert car.cond is not None and car.p.tyre_thermals and car.fuel == pytest.approx(40.0)
+    assert car.cond.i == 500  # surface lookups start where the car is
+    assert np.any(car.cond.line_offset != 0)  # rubber lies on the racing line
+    assert car.p.chassis.actuator_limits and car.p.brakes.thermal
+
+
+def test_migrated_weights_drive_exactly_like_the_old_network():
+    from carsim.learn import OBS_NAMES, OBS_V1, migrate_theta
+    rng = np.random.default_rng(4)
+    old = Policy(len(OBS_V1)).init_random(rng)
+    new_theta = migrate_theta(old.theta, OBS_V1)
+    new = Policy(len(OBS_NAMES), theta=new_theta)
+    obs_old = rng.standard_normal(len(OBS_V1))
+    obs_new = np.concatenate([obs_old, rng.standard_normal(len(OBS_NAMES) - len(OBS_V1)) * 3])
+    assert np.allclose(old.act(obs_old), new.act(obs_new))
+
+
+def test_old_run_is_archived_and_training_starts_fresh(tmp_path, monkeypatch):
+    from carsim.learn import OBS_V1
+    monkeypatch.setattr(learn, "RUNS_DIR", tmp_path)
+    d = tmp_path / "short"
+    d.mkdir()
+    old = Policy(len(OBS_V1)).init_random(np.random.default_rng(5)).theta
+    np.savez(d / "checkpoint.npz", theta=old, m=old * 0, v=old * 0, t=7, gen=7, best_theta=old, best_fitness=4000.0)
+    np.save(d / "policy.npy", old)
+    (d / "progress.csv").write_text("generation,minutes\n7,1.0\n")
+    cfg = TrainConfig(track="short", population=2, starts=1, laps=1,
+                      episode=EpisodeConfig(track="short", max_time=1.0, laps=1))
+    train(cfg, workers=1, generations=1, log=lambda *a: None)
+    assert (d / "legacy_1" / "policy.npy").exists() and (d / "legacy_1" / "progress.csv").exists()
+    assert int(np.load(d / "checkpoint.npz")["gen"]) == 1
+    assert np.load(d / "policy.npy").size == Policy(N_OBS).size
+    # carry-over keeps the old weights
+    for f in d.glob("*.*"):
+        f.unlink()
+    np.savez(d / "checkpoint.npz", theta=old, m=old * 0, v=old * 0, t=7, gen=7, best_theta=old, best_fitness=4000.0)
+    np.save(d / "policy.npy", old)
+    msgs = []
+    train(cfg, workers=1, generations=0, log=msgs.append, carry_over=True)
+    assert (d / "legacy_2").exists() and any("carrying over" in m for m in msgs)
+    # load_policy also understands a legacy policy file (for watching an old driver)
+    np.save(d / "policy.npy", old)
+    (d / "config.json").unlink(missing_ok=True)
+    assert learn.load_policy("short").size == Policy(N_OBS).size
+
+
+def test_three_lap_score_counts_every_lap_and_rewards_speed():
+    from carsim.learn import lap_score
+    L = 1100.0
+    assert lap_score([30.0], 3, L) == pytest.approx(1000.0)
+    assert lap_score([30.0, 28.0], 3, L) == pytest.approx(2000.0)
+    fast, slow = lap_score([30.0, 28.0, 28.0], 3, L), lap_score([30.0, 29.0, 29.0], 3, L)
+    assert fast > slow > 3000.0
+
+
+def test_practice_runs_cover_the_laps_and_vary_the_car():
+    from carsim.learn import practice_runs
+    cfg = TrainConfig(track="short", starts=6, laps=3)
+    runs = practice_runs(cfg, np.random.default_rng(0), gen=0)
+    L = learn.TRACKS["short"]().length
+    assert runs[0].start_s == 0.0 and runs[0].max_distance == pytest.approx(3 * L)
+    temps = {r.tyre_temp for r in runs[1:]}
+    assert len(temps) == 5 and all(60.0 <= t <= 115.0 for t in temps)
+
+
+def test_multi_track_training_tests_every_track(tmp_path, monkeypatch):
+    from carsim.learn import practice_runs
+    monkeypatch.setattr(learn, "RUNS_DIR", tmp_path)
+    cfg = TrainConfig(track="short", tracks=("short", "test"), population=2, starts=8, laps=1,
+                      episode=EpisodeConfig(max_time=1.0, laps=1))
+    assert cfg.run_name() == "multi_short-test"
+    rng = np.random.default_rng(1)
+    assert practice_runs(cfg, rng, 0)[0].track == "short" and practice_runs(cfg, rng, 1)[0].track == "test"
+    assert {r.track for r in practice_runs(cfg, rng, 0)[1:]} == {"short", "test"}
+    msgs = []
+    cfg.starts = 1
+    train(cfg, workers=1, generations=1, log=msgs.append)
+    assert (tmp_path / "multi_short-test" / "policy.npy").exists()
+    assert "short:" in msgs[-1] and "test:" in msgs[-1]

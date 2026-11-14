@@ -5,6 +5,11 @@ and wear (thermal.py), 8–9 track and weather (conditions.py, optional): slope 
 crests, grip per wheel from rubber, water, kerbs and grass, wind, tyre compound.
 Phase 10: fuel burns with engine power; mass, weight split, centre-of-gravity height
 and yaw inertia follow the fuel load; the engine stops when the tank is empty.
+Phase 13 (realism limits): the steering, throttle and brake move at finite rates (hands,
+feet, rack and hydraulics), steering gets slower as the tyres load up with speed, the
+tyres' lateral force lags the slip angle by a relaxation length, carbon brakes have a
+temperature (little bite cold, fade when overheated), and the gearbox refuses a downshift
+that would over-rev the engine.
 
 Body states: position (x, y), heading psi, body-frame velocities (vx, vy) and yaw
 rate r. Each wheel has its own spin speed and its own combined-slip tyre force.
@@ -22,7 +27,7 @@ import dataclasses
 from . import thermal
 from .conditions import COMPOUNDS, Conditions
 from .aero import aero_forces, ride_heights
-from .params import G, CarParams, Environment
+from .params import G, CarParams, Environment, brake_friction
 from .powertrain import RPM_TO_RADS, engine_torque, overall_ratio
 from .tyres import combined
 from .vehicle import Inputs  # noqa: F401  (re-exported: same inputs plus steer)
@@ -49,7 +54,11 @@ class State2D:
     w: list = field(default_factory=lambda: [0.0] * 4)
     kappa: list = field(default_factory=lambda: [0.0] * 4)
     alpha: list = field(default_factory=lambda: [0.0] * 4)
-    steer: float = 0.0
+    steer: float = 0.0  # actual road-wheel angle (rate limited), rad
+    throttle: float = 0.0  # actual pedal positions (rate limited), 0..1
+    brake: float = 0.0
+    alpha_cmd: list = field(default_factory=lambda: [0.0] * 4)  # geometric slip angle before relaxation
+    brake_temp: list = field(default_factory=lambda: [450.0] * 4)  # deg C per corner
     hf: float = 0.0  # ride heights, m
     hr: float = 0.0
     tyres: list = field(default_factory=list)  # TyreThermalState per wheel
@@ -97,10 +106,12 @@ class Car2D:
         self.inertia = (c.wheel_inertia_front / 2,) * 2 + (c.wheel_inertia_rear / 2,) * 2
         self.state.hf, self.state.hr = c.ride_height_front, c.ride_height_rear
         self.state.tyres = [thermal.TyreThermalState.from_blankets(self.thermal) for _ in range(4)]
+        self.state.brake_temp = [self.p.brakes.start_temp] * 4
         self._vert = (0.0, 0.0)  # (grade, vertical curvature) under the car
         self._wind = (0.0, 0.0)
         self.fuel = self.p.fuel.start_kg
         self.fuel_flow = 0.0
+        self.surface_grip = [1.0] * 4
         self._update_mass()
 
     # ---- mass properties (phase 10) -----------------------------------------
@@ -160,10 +171,25 @@ class Car2D:
         rad = c.wheel_radius
 
         if inp.gear is not None and inp.gear != s.gear and 0 <= inp.gear <= len(p.gearbox.ratios):
-            s.gear = inp.gear
-            s.shift_timer = p.gearbox.shift_time
-        steer = max(-c.max_steer, min(c.max_steer, inp.steer))
-        s.steer = steer
+            ok = True
+            if c.overrev_protection and 0 < inp.gear < s.gear:
+                w_r = (s.w[2] + s.w[3]) / 2
+                ok = w_r * overall_ratio(p.gearbox, inp.gear) / RPM_TO_RADS < p.engine.rev_limit_rpm
+            if ok:
+                s.gear = inp.gear
+                s.shift_timer = p.gearbox.shift_time
+        target = max(-c.max_steer, min(c.max_steer, inp.steer))
+        thr_t = min(max(inp.throttle, 0.0), 1.0)
+        brk_t = min(max(inp.brake, 0.0), 1.0)
+        if c.actuator_limits:
+            f = min(s.speed / c.steer_rate_speed, 1.0)
+            ds_max = (c.max_steer_rate + (c.max_steer_rate_fast - c.max_steer_rate) * f) * dt
+            s.steer += max(-ds_max, min(ds_max, target - s.steer))
+            s.throttle += max(-c.throttle_rate_down * dt, min(c.throttle_rate_up * dt, thr_t - s.throttle))
+            s.brake += max(-c.brake_rate_down * dt, min(c.brake_rate_up * dt, brk_t - s.brake))
+        else:
+            s.steer, s.throttle, s.brake = target, thr_t, brk_t
+        steer, throttle = s.steer, s.throttle
 
         # Track and weather under the car.
         cond = self.cond
@@ -186,6 +212,7 @@ class Car2D:
                 off = -(xw - tr.x[ic]) * sc + (yw - tr.y[ic]) * hc
                 surf_grip[i], depth[i], surf[i] = cond.wheel_surface(tr.s[ic] + ds_w, off, self.compound, s.vx)
 
+        self.surface_grip = surf_grip  # what the driver feels through the seat (kerbs, grass, green track)
         drs = bool(getattr(inp, "drs", False))
         loads, ar = self.wheel_loads(drs)
         downforce = ar.downforce
@@ -201,15 +228,15 @@ class Car2D:
         t_eng = 0.0
         if s.gear == 0 or s.shift_timer > 0:
             rpm, t_axle = max(rpm_wheel, p.engine.idle_rpm), 0.0
-        elif rpm_wheel < self.launch_rpm and inp.throttle > 0:
+        elif rpm_wheel < self.launch_rpm and throttle > 0:
             clutch, rpm = "slip", self.launch_rpm
-            t_eng = max(engine_torque(p.engine, rpm, inp.throttle, env.air_density), 0.0)
+            t_eng = max(engine_torque(p.engine, rpm, throttle, env.air_density), 0.0)
             t_axle = t_eng * ratio * p.gearbox.efficiency
         elif rpm_wheel < p.engine.idle_rpm:
             rpm, t_axle = p.engine.idle_rpm, 0.0
         else:
             clutch, rpm = "locked", rpm_wheel
-            t_eng = engine_torque(p.engine, rpm, inp.throttle, env.air_density)
+            t_eng = engine_torque(p.engine, rpm, throttle, env.air_density)
             t_axle = t_eng * ratio * p.gearbox.efficiency
             extra_inertia = p.engine.inertia * ratio ** 2 / 2
         s.rpm = rpm
@@ -238,10 +265,15 @@ class Car2D:
         lock = c.diff_locking * (s.w[2] - s.w[3])
         drive = [0.0, 0.0, t_axle / 2 - lock, t_axle / 2 + lock]
 
-        brake = min(max(inp.brake, 0.0), 1.0)
+        brake = s.brake
         bf = brake * c.max_brake_force * c.brake_front_bias * rad / 2
         br = brake * c.max_brake_force * (1 - c.brake_front_bias) * rad / 2
         tbrake = [bf, bf, br, br]
+        bk = p.brakes
+        if bk.thermal:
+            tbrake = [tb * brake_friction(bk, tt) for tb, tt in zip(tbrake, s.brake_temp)]
+        p_brake = [0.0] * 4
+        relax = c.relaxation_length
 
         cos_d, sin_d = math.cos(steer), math.sin(steer)
         fx_body = fy_body = mz = 0.0
@@ -256,7 +288,12 @@ class Car2D:
                 v_long, v_lat = vxi, vyi
             denom = max(abs(v_long), V_MIN)
             kappa = (s.w[i] * rad - v_long) / denom
-            alpha = -math.atan(v_lat / denom)
+            alpha_geo = -math.atan(v_lat / denom)
+            s.alpha_cmd[i] = alpha_geo
+            if relax > 0:  # first-order lag over the relaxation length (exact for constant speed)
+                alpha = s.alpha[i] + (alpha_geo - s.alpha[i]) * (1 - math.exp(-denom * dt / relax))
+            else:
+                alpha = alpha_geo
             s.kappa[i], s.alpha[i] = kappa, alpha
             k_eval = max(-1.0, min(1.0, kappa))
             fz = loads[i]
@@ -279,6 +316,8 @@ class Car2D:
                 else:
                     fx += stiff * (w_new - w_old)
             s.w[i] = w_new
+            if tb > 0 and w_new > 0:  # the brake only heats while the wheel turns against it
+                p_brake[i] = tb * 0.5 * (w_old + w_new)
             p_slide[i] = abs(fx * (w_new * rad - v_long)) + abs(fy * v_lat)
 
             if i < 2:
@@ -322,6 +361,11 @@ class Car2D:
                 wet = cond.sp.water_cooling * depth[i] * math.sqrt(s.speed) if cond is not None else 0.0
                 thermal.update(self.thermal, s.tyres[i], p_slide[i], loads[i], s.speed,
                                env.air_temp_c, env.track_temp_c, dt, wet)
+        if bk.thermal:
+            h = bk.h_base + bk.h_per_ms * s.speed
+            for i in range(4):
+                tt = s.brake_temp[i]
+                s.brake_temp[i] = tt + dt * (bk.heat_share * p_brake[i] - h * (tt - env.air_temp_c)) / bk.heat_capacity
         if cond is not None:
             cond.update(dt, float(cond.track.s[cond.i]), sum(p_slide))
         s.t += dt
@@ -333,7 +377,7 @@ class Car2D:
         row = {
             "t": s.t, "x": s.x, "y": s.y, "psi": s.psi, "vx": s.vx, "vy": s.vy, "v": s.speed,
             "yaw_rate": s.r, "ax": ax, "ay": ay, "sideslip": s.sideslip, "steer": steer,
-            "throttle": inp.throttle, "brake": brake, "gear": s.gear, "rpm": rpm,
+            "throttle": throttle, "brake": brake, "steer_cmd": target, "throttle_cmd": thr_t, "brake_cmd": brk_t, "gear": s.gear, "rpm": rpm,
             "clutch": clutch, "tc_cut": tc_cut, "downforce": downforce, "dist": s.dist,
             "drag": f_drag, "ClA": ar.ClA, "CdA": ar.CdA, "aero_balance": ar.front_share,
             "ride_front": s.hf, "ride_rear": s.hr, "drs": drs,
@@ -360,4 +404,5 @@ class Car2D:
             row[f"surf_{n}"] = surf[i]
             row[f"sgrip_{n}"] = surf_grip[i]
             row[f"pslide_{n}"] = p_slide[i]
+            row[f"tbrake_{n}"] = s.brake_temp[i]
         return row

@@ -86,6 +86,50 @@ class Chassis:
     min_ride_height: float = 0.002  # skid blocks
     max_brake_force: float = 40000.0  # N at full pedal, before grip limit
     brake_front_bias: float = 0.58
+    # Physical limits on how fast the controls can move (applied inside the car, so they bind
+    # every driver: human, scripted or learned). A driver's hands and the steering rack cannot
+    # flick from lock to lock in an instant, and it gets harder as the tyres load up with speed.
+    # Rates are at the road wheel: 1.6 rad/s ~ 92 deg/s ~ 500 deg/s at a 5.5:1 single-seater wheel.
+    actuator_limits: bool = True
+    max_steer_rate: float = 1.6  # rad/s at the road wheel, low speed
+    max_steer_rate_fast: float = 0.9  # rad/s at the road wheel at steer_rate_speed and above (heavy steering)
+    steer_rate_speed: float = 80.0  # m/s
+    throttle_rate_up: float = 8.0  # pedal travel per s (0 -> full in 0.125 s)
+    throttle_rate_down: float = 20.0  # lifting is quicker (0.05 s)
+    brake_rate_up: float = 10.0  # 0 -> full brake pressure in 0.1 s (foot + hydraulics)
+    brake_rate_down: float = 15.0
+    # Tyre relaxation length (phase 13): a tyre needs to roll this far for its lateral force
+    # to build up after the slip angle changes. 0 = instant (the old behaviour).
+    relaxation_length: float = 0.35  # m
+    overrev_protection: bool = True  # the gearbox refuses a downshift that would over-rev the engine
+
+
+@dataclass
+class Brakes:
+    """Carbon-carbon brake temperature (phase 13). Carbon has little bite when cold, a wide
+    window when hot, and fades (and wears) once it overheats."""
+    thermal: bool = True
+    heat_capacity: float = 1500.0  # J/K per corner, disc + pads
+    heat_share: float = 0.9  # share of the braking power that ends up in the disc and pads
+    h_base: float = 5.0  # W/K to the air at standstill
+    h_per_ms: float = 1.0  # W/K per m/s through the brake ducts (time constant ~20 s at 250 km/h)
+    start_temp: float = 450.0  # deg C at the start (already warm; set lower for an out-lap)
+    t_cold: float = 350.0  # below this the carbon loses bite
+    cold_floor_temp: float = 100.0  # temperature of the cold_mu value
+    cold_mu: float = 0.65  # friction factor of a stone-cold brake
+    t_hot: float = 1000.0  # above this the brake fades
+    fade_per_100k: float = 0.10  # friction lost per 100 K over t_hot
+    min_mu: float = 0.5
+
+
+def brake_friction(b: Brakes, temp_c: float) -> float:
+    """Friction factor (1 = full bite) of a carbon brake at temp_c."""
+    if temp_c < b.t_cold:
+        x = min(max((temp_c - b.cold_floor_temp) / (b.t_cold - b.cold_floor_temp), 0.0), 1.0)
+        return b.cold_mu + (1 - b.cold_mu) * x
+    if temp_c > b.t_hot:
+        return max(1 - b.fade_per_100k * (temp_c - b.t_hot) / 100.0, b.min_mu)
+    return 1.0
 
 
 @dataclass
@@ -123,6 +167,7 @@ class CarParams:
     tyres: TyreParams = field(default_factory=TyreParams)
     thermal: ThermalParams = field(default_factory=ThermalParams)
     fuel: Fuel = field(default_factory=Fuel)
+    brakes: Brakes = field(default_factory=Brakes)
     tyre_thermals: bool = True  # False = tyres always at optimum, never wear
 
 

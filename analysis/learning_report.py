@@ -3,6 +3,7 @@
 Usage: python analysis/learning_report.py [track] [out.png]
 """
 import csv
+import json
 import os
 import sys
 from pathlib import Path
@@ -27,22 +28,27 @@ def main(track="short", out="learning_report.png"):
     lap = np.array([float(r["test_lap_s"]) for r in rows])
     done = np.array([r["test_lap_done"] == "1" for r in rows])
     mins = float(rows[-1]["minutes"])
-    L = TRACKS[track]().length
+    try:  # several laps per test drive since phase 13 (config.json "laps"); multi-track runs: first track
+        cfg = json.loads((run_dir(track) / "config.json").read_text())
+        laps, first_track = int(cfg.get("laps", 1)), (cfg.get("tracks") or [cfg.get("track", track)])[0]
+    except (OSError, ValueError):
+        laps, first_track = 1, track
+    L = TRACKS[first_track if first_track in TRACKS else "short"]().length * laps
     fig, axes = plt.subplots(1, 2, figsize=(14, 4.8), dpi=150)
     first = gen[done][0] if done.any() else None
     fig.suptitle(f"Self-taught driver, {track} circuit: " +
-                 (f"first full lap at generation {first}, best {np.nanmin(lap):.2f} s" if first else "no full lap yet"),
+                 (f"first full {laps}-lap run at generation {first}, best {np.nanmin(lap):.2f} s" if first else "no full lap yet"),
                  x=0.04, ha="left", fontsize=13, color=INK, fontweight="bold")
     ax = axes[0]
     ax.plot(gen, np.minimum(prog, L), color=BLUE, lw=1.5, marker="o", ms=3)
     ax.axhline(L, color=MUTED, lw=1, ls="--")
-    ax.text(gen[0], L * 1.01, f"full lap ({L:.0f} m)", fontsize=8, color=MUTED, va="bottom")
+    ax.text(gen[0], L * 1.01, f"full run, {laps} lap{'s' * (laps > 1)} ({L:.0f} m)", fontsize=8, color=MUTED, va="bottom")
     style(ax, "Test drive from the start line: distance before crashing", "Generation", "Distance (m)")
     ax.set_ylim(0, L * 1.1)
     ax = axes[1]
     if done.any():
         ax.plot(gen[done], lap[done], color=ORANGE, lw=0, marker="o", ms=6, mec="white")
-    style(ax, "Lap time when it finishes", "Generation", "Lap time (s)")
+    style(ax, "Best lap of the test drive" + (f" ({laps} laps)" if laps > 1 else ""), "Generation", "Lap time (s)")
     ax.set_xlim(axes[0].get_xlim())
     fig.text(0.99, 0.01, f"{len(rows)} generations, {mins:.0f} min of training", ha="right", fontsize=8, color=MUTED)
     fig.tight_layout(rect=(0, 0.02, 1, 0.92))
