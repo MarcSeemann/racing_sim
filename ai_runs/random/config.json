@@ -1,0 +1,120 @@
+{
+ "track": "random",
+ "tracks": [],
+ "population": 120,
+ "laps": 3,
+ "starts": 4,
+ "start_time": 14.0,
+ "start_speed": [
+  10.0,
+  35.0
+ ],
+ "start_distance": 500.0,
+ "crash_penalty_frac": 0.5,
+ "time_bonus": 10.0,
+ "crash_speed_penalty": 6.0,
+ "corner_focus": 0.5,
+ "corner_speed": [
+  25.0,
+  55.0
+ ],
+ "corner_approach": [
+  40.0,
+  250.0
+ ],
+ "tyre_temp": [
+  60.0,
+  115.0
+ ],
+ "brake_temp": [
+  250.0,
+  900.0
+ ],
+ "fuel_kg": [
+  5.0,
+  60.0
+ ],
+ "sigma": 0.05,
+ "lr": 0.03,
+ "weight_decay": 0.002,
+ "hidden": [
+  32,
+  32
+ ],
+ "seed": 1,
+ "episode": {
+  "track": "random",
+  "max_time": 0.0,
+  "laps": 3,
+  "start_speed": 15.0,
+  "start_s": 0.0,
+  "off_margin": 1.0,
+  "alive_bonus": 0.0,
+  "lap_bonus": true,
+  "max_distance": 0.0,
+  "crash_penalty": 0.0,
+  "crash_speed_penalty": 0.0,
+  "time_bonus": 0.0,
+  "ref_speed": 15.0,
+  "realistic": true,
+  "fuel_kg": 40.0,
+  "tyre_temp": null,
+  "brake_temp": null,
+  "rubber": 2000000.0,
+  "downforce": "medium",
+  "phys_dt": 0.001
+ },
+ "tracks_per_gen": 2,
+ "random_line_laps": 1,
+ "validation": [
+  "random:0",
+  "random:1",
+  "random:2",
+  "random:3"
+ ],
+ "test_track": "monza",
+ "test_every": 5,
+ "init_from": null,
+ "obs_names": [
+  "vx",
+  "vy",
+  "yaw_rate",
+  "cross_track",
+  "sin_heading_err",
+  "cos_heading_err",
+  "alpha_front",
+  "alpha_rear",
+  "kappa_rear",
+  "steer",
+  "curv_5",
+  "curv_15",
+  "curv_30",
+  "curv_50",
+  "curv_80",
+  "curv_120",
+  "curv_170",
+  "curv_230",
+  "throttle",
+  "brake",
+  "kappa_front",
+  "grip_front",
+  "grip_rear",
+  "tyre_temp_front",
+  "tyre_temp_rear",
+  "brake_temp_front",
+  "brake_temp_rear",
+  "fuel",
+  "surface_grip",
+  "grade_0",
+  "grade_60",
+  "grade_150",
+  "crest_40",
+  "body_roll",
+  "body_pitch",
+  "ride_front",
+  "ers_soc",
+  "width_left",
+  "width_right"
+ ],
+ "physics_version": 3
+}
