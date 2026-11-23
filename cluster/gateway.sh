@@ -12,6 +12,7 @@
 #   help                              this list
 #   info                              sinfo summary and the gateway's limits
 #   status                            your queued/running claude-* jobs
+#   queue                             queue length, estimated start of pending jobs, and of 16/32/64-CPU jobs
 #   history [days]                    claude-* jobs of the last days (sacct), default 3
 #   push-code                         stdin: a git bundle; its branches go into $BASE/repo.git
 #   submit <run> <sha> <cpus> <hours> [train flags...]
@@ -85,6 +86,20 @@ info)
 
 status)
   echo "JOBID NAME STATE ELAPSED LIMIT REASON"; claude_jobs ;;
+
+queue)  # read-only: where the claude-* jobs stand in the queue, and what a smaller job would get
+  part="${PARTITION:-$(sinfo -h -o '%P' | awk '/\*$/ {sub(/\*$/, ""); print; exit}')}"
+  echo "partition $part: $(squeue -p "$part" -t PD -h | wc -l) jobs pending, $(squeue -p "$part" -t R -h | wc -l) running"
+  echo "-- estimated start (SLURM's guess, changes as jobs finish early)"
+  claude_jobs | awk '$3 == "PENDING" {print $1}' | while read -r j; do
+    squeue -h -j "$j" --start -o '%i %j %S %r' 2>/dev/null || true
+    rank="$(squeue -p "$part" -t PD -h --sort=-p -o '%i' | grep -n "^$j\$" | cut -d: -f1 || true)"
+    echo "   $j is number ${rank:-?} by priority among pending jobs"
+  done
+  for c in 16 32 64; do
+    t="$(sbatch --test-only -p "$part" -N 1 -c "$c" -t 23:30:00 --wrap=true 2>&1 | sed -n 's/.*to start at \([^ ]*\).*/\1/p')"
+    echo "   a new ${c}-CPU 23.5 h job would start: ${t:-unknown}"
+  done ;;
 
 history)
   d="${ARGS[0]:-3}"; need days "$d" "$RE_INT"
