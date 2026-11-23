@@ -7,6 +7,7 @@
 #   cluster/install.sh hyperion --no-venv                         # skip the Python venv
 #   cluster/install.sh hyperion --module Miniforge3 --python /scratch/me/envs/carsim_venv/bin/python
 #                                                   # use a venv you already have (implies --no-venv)
+#   cluster/install.sh hyperion --key-type rsa      # if the cluster does not accept ed25519 user keys
 #
 # 1. makes a new key ~/.ssh/claude_carsim_<alias> just for the gateway (ed25519, no passphrase:
 #    it can only ever run the gateway),
@@ -21,12 +22,13 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET="${1:?usage: cluster/install.sh <ssh alias or user@host> [--base DIR] [--module NAME] [--no-venv]}"
 shift
-BASE='$HOME/carsim-claude'; MODULE=""; VENV=1; PY=""
+BASE='$HOME/carsim-claude'; MODULE=""; VENV=1; PY=""; KTYPE="ed25519"
 while (( $# )); do
   case "$1" in
     --base) BASE="${2:?--base needs a directory}"; shift 2 ;;
     --module) MODULE="${2:?--module needs a module name}"; shift 2 ;;
     --no-venv) VENV=0; shift ;;
+    --key-type) KTYPE="${2:?--key-type ed25519|rsa}"; shift 2 ;;
     --python) PY="${2:?--python needs the path of a python binary}"; VENV=0; shift 2 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
@@ -35,14 +37,19 @@ done
 [[ -z "$MODULE" || "$MODULE" =~ ^[A-Za-z0-9_./+-]+$ ]] || { echo "--module: bad name" >&2; exit 2; }
 [[ -z "$PY" || "$PY" =~ ^[A-Za-z0-9_./\$-]+$ ]] || { echo "--python: plain path please" >&2; exit 2; }
 alias_clean="$(echo "$TARGET" | tr -c 'A-Za-z0-9_-' '_')"
+[[ "$KTYPE" == ed25519 || "$KTYPE" == rsa ]] || { echo "--key-type: ed25519 or rsa" >&2; exit 2; }
 KEY="$HOME/.ssh/claude_carsim_${alias_clean%_}"
+[[ "$KTYPE" == rsa ]] && KEY="${KEY}_rsa"
 
 host="$(ssh -G "$TARGET" | awk '$1=="hostname"{print $2}')"
 user="$(ssh -G "$TARGET" | awk '$1=="user"{print $2}')"
 port="$(ssh -G "$TARGET" | awk '$1=="port"{print $2}')"
 echo "cluster: $user@$host port $port"
 
-[[ -f "$KEY" ]] || ssh-keygen -q -t ed25519 -N "" -C "claude-carsim" -f "$KEY"
+if [[ ! -f "$KEY" ]]; then
+  if [[ "$KTYPE" == rsa ]]; then ssh-keygen -q -t rsa -b 4096 -N "" -C "claude-carsim" -f "$KEY"
+  else ssh-keygen -q -t ed25519 -N "" -C "claude-carsim" -f "$KEY"; fi
+fi
 pub="$(cat "$KEY.pub")"
 
 # Shell lines that make the module's python available (in the installer and in every job).
