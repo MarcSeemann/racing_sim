@@ -156,6 +156,27 @@ To get a Monza driver directly, fine-tune a copy on Monza itself:
 `python -m carsim.learn train --track monza --init-from monza-v2 --name monza-ft --fast-corner-share 0.25 --steer-penalty 2`.
 To run either on a SLURM cluster through a restricted SSH gateway, see [cluster/README.md](cluster/README.md).
 
+**Looking further ahead, and knowing the circuit.** On top of the eight curvature points up to
+230 m, the driver now has two more kinds of input (`carsim/track_memory.py`):
+
+- *Sight*: five windows covering the next 5 seconds at its current speed (60–550 m: about 450 m
+  flat out, 100 m in a hairpin). The windows get longer further out, so near the car it sees
+  detail and far away only how tight the worst bit is and roughly where. Each gives the tightest
+  and the mean curvature in it, so a short chicane can't hide between two points.
+- *Track knowledge*: what a driver who has studied the circuit knows before seeing it: distance to
+  the next two significant corners (tighter than R 100 m, a chicane counts as one), how tight they
+  are, the first one's length, width and gradient, and the straight after it.
+
+A driver trained before this starts with zero weight on the new inputs, so it drives as before
+(up to floating-point rounding); train a new run from it with `--init-from`. Resuming an older run
+with the new inputs archives it and starts afresh, like any change of inputs.
+
+**Free practice before the race.** Like FP1–FP3 at a Grand Prix, a copy of the driver can practise
+on a circuit for a few generations before the 3-lap test. Nothing is saved, so this works on the
+held-out F1 calendar too: it measures how quickly the driver learns a new circuit.
+
+    python -m carsim.learn practice --policy monza-v2 --track f1:suzuka,f1:spa --generations 20
+
 ## Circuits
 
 Use these names with `--track` anywhere:

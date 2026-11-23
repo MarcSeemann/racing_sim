@@ -67,6 +67,7 @@ from .dynamics import Car2D
 from .f1_calendar import is_calendar
 from .params import CarParams, race_car
 from .racing_line import cached_racing_line
+from .track_memory import LOOKAHEAD_NAMES, MEMORY_NAMES, lookahead, memory
 from .vehicle import Inputs
 
 LOOKAHEAD_M = (5, 15, 30, 50, 80, 120, 170, 230)
@@ -84,10 +85,14 @@ RUBBER_LINE_STEP = 16  # racing-line resolution (samples) used to place the rubb
 # (matching inputs keep their weights, new inputs start at zero, so the old driver drives the same).
 OBS_V1 = (["vx", "vy", "yaw_rate", "cross_track", "sin_heading_err", "cos_heading_err",
            "alpha_front", "alpha_rear", "kappa_rear", "steer"] + [f"curv_{d}" for d in LOOKAHEAD_M])
-OBS_NAMES = (OBS_V1 + ["throttle", "brake", "kappa_front", "grip_front", "grip_rear",
-                      "tyre_temp_front", "tyre_temp_rear", "brake_temp_front", "brake_temp_rear",
-                      "fuel", "surface_grip"] + [f"grade_{d}" for d in GRADE_AHEAD_M] + ["crest_40"]
-             + ["body_roll", "body_pitch", "ride_front", "ers_soc", "width_left", "width_right"])
+OBS_V3 = (OBS_V1 + ["throttle", "brake", "kappa_front", "grip_front", "grip_rear",
+                   "tyre_temp_front", "tyre_temp_rear", "brake_temp_front", "brake_temp_rear",
+                   "fuel", "surface_grip"] + [f"grade_{d}" for d in GRADE_AHEAD_M] + ["crest_40"]
+          + ["body_roll", "body_pitch", "ride_front", "ers_soc", "width_left", "width_right"])
+# Version 4: it looks ~5 s ahead in windows that coarsen with distance, and knows the next corners of
+# the circuit before it can see them (carsim.track_memory). Drivers trained on OBS_V3 carry over:
+# the new inputs start with zero weight.
+OBS_NAMES = OBS_V3 + LOOKAHEAD_NAMES + MEMORY_NAMES
 # The layout of the varying-width branch's runs (its "version 2": the edge distances after the basics).
 OBS_V2W = OBS_V1[:10] + ["width_left", "width_right"] + OBS_V1[10:]
 
@@ -152,7 +157,7 @@ def adapt_theta(theta, hidden=(32, 32), obs_names=None):
     if theta.size == Policy(N_OBS, hidden).size and (obs_names is None or list(obs_names) == OBS_NAMES):
         return theta, False
     if obs_names is None:  # older runs did not save their layout: tell it from the network's size
-        for layout in (OBS_V1, OBS_V2W):
+        for layout in (OBS_V1, OBS_V2W, OBS_V3):
             if theta.size == Policy(len(layout), hidden).size:
                 obs_names = layout
                 break
@@ -199,6 +204,8 @@ def observe(car, track, i: int) -> np.ndarray:
     obs += [s.ph * 100.0, s.th * 200.0, (s.hf - 0.02) * 100.0,
             (car.ers_energy / e.store - 0.5) * 2 if e.enabled else 0.0]
     obs += [track._wl[i] / 6.0, track._wr[i] / 6.0]  # room to the edges: widths vary round a lap
+    obs += lookahead(track, i, s.speed)  # sight: the next ~5 s, coarser further out
+    obs += memory(track, i)  # knowledge: the next corners of the circuit, however far
     return np.array(obs)
 
 
@@ -703,6 +710,49 @@ def train(cfg: TrainConfig, workers: int = 2, generations: int | None = None, ho
     return best
 
 
+# ---- practice sessions: learning a circuit before the race -------------------------------------
+def practice_session(theta, track: str, generations: int = 20, population: int = 32, workers: int = 2,
+                     hidden=(32, 32), laps: int = 3, starts: int = 4, fast_corner_share: float = 0.25,
+                     steer_penalty: float = 2.0, seed: int = 0, log=print) -> dict:
+    """Free practice before the test, like FP1-FP3 at a Grand Prix: a COPY of the driver trains on this
+    one circuit for `generations` generations, then drives the `laps`-lap test from the line.
+
+    Returns {"before": info, "after": info, "history": [...], "theta": weights after practice}, where
+    info is run_episode's (laps, progress, reason, ...) for the test before and after practice.
+    Nothing is saved and the trained driver is not changed, so this is allowed on the held-out F1
+    calendar: it measures how quickly the driver learns a new circuit, not something it trained on.
+    The test itself never steers the practice (no picking the best practice version by its test)."""
+    cfg = TrainConfig(track=track, population=population, laps=laps, starts=starts, hidden=tuple(hidden),
+                      fast_corner_share=fast_corner_share, steer_penalty=steer_penalty, seed=seed,
+                      episode=EpisodeConfig(track=track, laps=laps, max_time=default_max_time(track, laps)))
+    test = test_configs(cfg)[0]
+    rng = np.random.default_rng(seed)
+    theta = np.asarray(theta, float).copy()
+    adam = Adam(theta.size, cfg.lr)
+    half = max(population // 2, 1)
+    history = []
+    with ProcessPoolExecutor(max_workers=workers) as ex:
+        before = ex.submit(_eval_one, (theta.copy(), test, cfg.hidden))
+        for g in range(generations):
+            eps = rng.standard_normal((half, theta.size))
+            thetas = [theta + cfg.sigma * e for e in eps] + [theta - cfg.sigma * e for e in eps]
+            runs = practice_runs(cfg, rng, g)
+            fit = np.array([r[0] for r in ex.map(_eval_one, [(th, runs, cfg.hidden) for th in thetas])])
+            w = _ranks(fit)
+            theta = theta + adam.step((w[:half] - w[half:]) @ eps / (half * cfg.sigma) - cfg.weight_decay * theta)
+            history.append({"generation": g + 1, "practice_mean": float(fit.mean()), "practice_best": float(fit.max())})
+            log(f"{track} practice {g + 1}/{generations}: mean {fit.mean():.0f} best {fit.max():.0f}")
+        after = ex.submit(_eval_one, (theta.copy(), test, cfg.hidden)).result()[1]
+        before = before.result()[1]
+    return {"track": track, "before": before, "after": after, "history": history, "theta": theta}
+
+
+def _test_summary(info, laps: int) -> str:
+    lt = info["laps"][:laps]
+    txt = " ".join(f"{x:.2f}" for x in lt) or "no lap"
+    return txt if len(lt) >= laps else f"{txt} ({info['reason']} at {info['progress']:.0f} m)"
+
+
 def _run_hidden(path: Path):
     f = path / "config.json"
     if f.exists():
@@ -799,6 +849,13 @@ def main(argv=None):
     t.add_argument("--tracks-per-gen", type=int, default=2, help="with --track random: new circuits per generation")
     t.add_argument("--test-laps", type=int, default=0, help="laps of the unseen test circuit (default: --laps)")
     t.add_argument("--test-every", type=int, default=5, help="generations between unseen-circuit tests")
+    pr = sub.add_parser("practice", help="free practice on a circuit, then the test (nothing is saved)")
+    pr.add_argument("--policy", "--run", dest="run", required=True, help="the trained driver to start from")
+    pr.add_argument("--track", required=True, help="circuit(s), comma-separated, e.g. f1:suzuka,f1:spa")
+    pr.add_argument("--generations", type=int, default=20, help="practice generations per circuit")
+    pr.add_argument("--population", type=int, default=32)
+    pr.add_argument("--laps", type=int, default=3)
+    pr.add_argument("--workers", type=int, default=max(os.cpu_count() or 2, 1))
     for name in ("status", "drive"):
         p = sub.add_parser(name)
         p.add_argument("--track", default="short", help="track, or run name for status (e.g. multi_short-test, random)")
@@ -839,6 +896,22 @@ def main(argv=None):
         print(lines[0])
         for ln in lines[1:][-15:]:
             print(ln)
+    elif a.cmd == "practice":
+        names = [x.strip() for x in a.track.split(",") if x.strip()]
+        for n in names:
+            if n not in TRACKS or n == "random":
+                ap.error(f"unknown track {n!r}")
+        theta, hidden = load_policy(a.run), _run_hidden(run_dir(a.run))
+        rows = []
+        for n in names:
+            r = practice_session(theta, n, generations=a.generations, population=a.population,
+                                 workers=a.workers, hidden=hidden, laps=a.laps)
+            rows.append((n, _test_summary(r["before"], a.laps), _test_summary(r["after"], a.laps)))
+            print(f"{n}: before practice {rows[-1][1]}  |  after {a.generations} generations {rows[-1][2]}")
+        if len(rows) > 1:
+            print("\ncircuit            before practice                      after practice")
+            for n, b, aft in rows:
+                print(f"{n:18s} {b:36s} {aft}")
     elif a.cmd == "drive":
         if a.track not in TRACKS or a.track == "random":
             ap.error(f"unknown track {a.track!r}")
