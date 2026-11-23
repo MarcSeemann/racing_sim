@@ -153,7 +153,7 @@ def test_episodes_on_monza_and_random_circuits():
     pol = Policy(N_OBS).init_random(np.random.default_rng(0))
     for name in ("monza", "random:9"):
         fit, info = run_episode(pol.theta, EpisodeConfig(track=name, max_time=3.0))
-        assert np.isfinite(fit) and info["reason"] in ("time", "off track", "stuck")
+        assert np.isfinite(fit) and info["reason"] in ("time", "off track", "stuck", "barrier", "disqualified")
 
 
 def test_training_on_random_circuits(tmp_path, monkeypatch):

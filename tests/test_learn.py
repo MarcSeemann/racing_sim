@@ -17,7 +17,7 @@ def test_episode_ends_and_scores_progress():
     pol = Policy(N_OBS).init_random(np.random.default_rng(0))
     fit, info = run_episode(pol.theta, EpisodeConfig(track="short", max_time=5.0))
     assert np.isfinite(fit) and info["time"] <= 5.0 + 0.05
-    assert info["reason"] in ("time", "off track", "stuck", "lap")
+    assert info["reason"] in ("time", "off track", "stuck", "lap", "barrier", "disqualified")
 
 
 def test_random_start_places_the_car_on_track():
@@ -71,7 +71,7 @@ def test_crash_costs_a_penalty_and_surviving_beats_crashing():
     pol = Policy(N_OBS).init_random(np.random.default_rng(0))  # random net: leaves the track quickly
     base = EpisodeConfig(track="short", max_time=10.0)
     f0, i0 = run_episode(pol.theta, base)
-    assert i0["reason"] in ("off track", "stuck")
+    assert i0["reason"] in ("off track", "stuck", "barrier", "disqualified")
     f1, _ = run_episode(pol.theta, EpisodeConfig(track="short", max_time=10.0, crash_penalty=250.0))
     assert f1 == pytest.approx(f0 - 250.0)
     # a slow run that survives the whole distance outscores a faster run that crashes before it

@@ -53,9 +53,18 @@ NAMED = {"short": short_circuit, "test": long_circuit, "hill": hill_circuit, "mo
 REAL = {"monza"}  # circuits built from survey data
 
 
-def get_track(name: str) -> Track:
+def get_track(name: str, runoff: bool = True) -> Track:
     """A circuit by name: one of NAMED, "random:<seed>" (also "random" = seed 0), "power:<seed>"
-    or "f1:<key>" (the 2026 calendar, carsim.f1_calendar)."""
+    or "f1:<key>" (the 2026 calendar, carsim.f1_calendar). With run-off areas and barriers beyond
+    the kerbs (carsim.runoff) unless runoff=False (the old open field of grass)."""
+    tr = _get_track(name)
+    if runoff:
+        from .runoff import with_runoff
+        tr = with_runoff(tr, name)
+    return tr
+
+
+def _get_track(name: str) -> Track:
     if name.startswith("f1:"):
         from . import f1_calendar
         return f1_calendar.load(name[3:])

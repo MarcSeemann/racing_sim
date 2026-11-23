@@ -78,7 +78,7 @@ RUNS_DIR = Path(os.environ.get("CARSIM_RUNS", "ai_runs"))
 # Bumped whenever the car's physics changes enough that old drivers/scores are not comparable:
 # a saved run with another version is archived (see _load_start). 2 = phase 13 limits, 3 = phase 14
 # suspension, kerbs, camber, LSD, ERS.
-PHYSICS_VERSION = 3
+PHYSICS_VERSION = 4  # 4 = run-off areas (asphalt, gravel, grass), barriers and track-limits rules
 RUBBER_LINE_STEP = 16  # racing-line resolution (samples) used to place the rubber in training
 
 # Observation layout, by name: a checkpoint saved with an older layout is mapped onto this one
@@ -92,7 +92,10 @@ OBS_V3 = (OBS_V1 + ["throttle", "brake", "kappa_front", "grip_front", "grip_rear
 # Version 4: it looks ~5 s ahead in windows that coarsen with distance, and knows the next corners of
 # the circuit before it can see them (carsim.track_memory). Drivers trained on OBS_V3 carry over:
 # the new inputs start with zero weight.
-OBS_NAMES = OBS_V3 + LOOKAHEAD_NAMES + MEMORY_NAMES
+OBS_V4 = OBS_V3 + LOOKAHEAD_NAMES + MEMORY_NAMES
+# Version 5: how long all four wheels have been beyond the white lines (3 s = disqualified), and the
+# room to the barrier on each side (a wall on a street circuit, a gravel trap on the outside of a corner).
+OBS_NAMES = OBS_V4 + ["offtrack_time", "room_left", "room_right"]
 # The layout of the varying-width branch's runs (its "version 2": the edge distances after the basics).
 OBS_V2W = OBS_V1[:10] + ["width_left", "width_right"] + OBS_V1[10:]
 
@@ -157,7 +160,7 @@ def adapt_theta(theta, hidden=(32, 32), obs_names=None):
     if theta.size == Policy(N_OBS, hidden).size and (obs_names is None or list(obs_names) == OBS_NAMES):
         return theta, False
     if obs_names is None:  # older runs did not save their layout: tell it from the network's size
-        for layout in (OBS_V1, OBS_V2W, OBS_V3):
+        for layout in (OBS_V1, OBS_V2W, OBS_V3, OBS_V4):
             if theta.size == Policy(len(layout), hidden).size:
                 obs_names = layout
                 break
@@ -206,10 +209,20 @@ def observe(car, track, i: int) -> np.ndarray:
     obs += [track._wl[i] / 6.0, track._wr[i] / 6.0]  # room to the edges: widths vary round a lap
     obs += lookahead(track, i, s.speed)  # sight: the next ~5 s, coarser further out
     obs += memory(track, i)  # knowledge: the next corners of the circuit, however far
+    obs += [getattr(car, "offtrack_time", 0.0) / DSQ_OFFTRACK_S,
+            min(track.room_to_barrier(i, +1), 40.0) / 20.0, min(track.room_to_barrier(i, -1), 40.0) / 20.0]
     return np.array(obs)
 
 
 N_OBS = len(OBS_NAMES)
+
+
+def update_offtrack(car, dt: float) -> bool:
+    """Track limits: True while all four wheels are beyond the white lines (kerbs are beyond the
+    line too, as in the F1 rules). Keeps car.offtrack_time, the seconds spent off continuously."""
+    off = all(x != "track" for x in getattr(car, "surfaces", ("track",)))
+    car.offtrack_time = getattr(car, "offtrack_time", 0.0) + dt if off else 0.0
+    return off
 
 
 @dataclass
@@ -219,7 +232,12 @@ class EpisodeConfig:
     laps: int = 3
     start_speed: float = 15.0
     start_s: float = 0.0  # m along the lap where the episode starts
-    off_margin: float = 1.0  # m beyond the track edge that ends the episode
+    off_margin: float = 1.0  # m beyond the track edge that ends the episode (track_limits=False only)
+    # Track limits (physics version 4): leaving the track is allowed, but all four wheels beyond the
+    # white lines is a violation (that lap does not count, limits_penalty), more than DSQ_OFFTRACK_S
+    # off in one go disqualifies the run, and touching a barrier is a crash. False = the old rule.
+    track_limits: bool = True
+    limits_penalty: float = 150.0
     alive_bonus: float = 0.0  # fitness per second on track (rewards slowing down rather than crashing)
     lap_bonus: bool = True  # practice runs from random starts do not count laps
     max_distance: float = 0.0  # m; the episode ends with reason "distance" when reached (0 = no cap)
@@ -276,6 +294,9 @@ def _start_gear(car, v):
     return best
 
 
+DSQ_OFFTRACK_S = 3.0  # s with all four wheels beyond the white lines: disqualified
+
+
 def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32, 32)):
     """Drive one episode with network weights theta. Returns (fitness, info[, telemetry])."""
     track = track or _track(cfg.track)
@@ -293,6 +314,10 @@ def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32,
     rows = []
     slow = 0.0
     steer_travel = 0.0
+    limits = cfg.track_limits and car.cond is not None and getattr(track, "_rl", None) is not None
+    car.offtrack_time = 0.0
+    violations, lap_clean, valid = 0, True, []  # valid[k]: lap k had no track-limits violation
+    was_off = False
     while s.t < cfg.max_time:
         i = track.nearest(s.x, s.y, i)
         act = policy.act(observe(car, track, i))
@@ -309,6 +334,8 @@ def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32,
         if ds < -track.length / 2:  # crossed the line
             ds += track.length
             lap_times.append(s.t - lap_start)
+            valid.append(lap_clean)
+            lap_clean = True
             lap_start = s.t
         elif ds > track.length / 2:
             ds -= track.length
@@ -317,7 +344,19 @@ def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32,
         if record:
             rows.append((s.t, s.x, s.y, s.speed * 3.6, s.steer, pedal, steer, s.throttle, s.brake,
                          s.tyres[0].t_surface, s.brake_temp[0]))
-        if track.off_track(i, track.cross_track_error(i, s.x, s.y), cfg.off_margin):
+        if limits:
+            off = update_offtrack(car, CONTROL_DT)
+            if off and not was_off:
+                violations += 1
+                lap_clean = False
+            was_off = off
+            if "barrier" in car.surfaces:
+                reason = "barrier"
+                break
+            if car.offtrack_time > DSQ_OFFTRACK_S:
+                reason = "disqualified"
+                break
+        elif track.off_track(i, track.cross_track_error(i, s.x, s.y), cfg.off_margin):
             reason = "off track"
             break
         slow = slow + CONTROL_DT if s.speed < 3.0 else 0.0
@@ -330,17 +369,19 @@ def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32,
         if len(lap_times) >= cfg.laps:
             reason = "lap"
             break
-    fitness = progress + cfg.alive_bonus * s.t - cfg.steer_penalty * steer_travel
-    if reason == "off track":
+    fitness = progress + cfg.alive_bonus * s.t - cfg.steer_penalty * steer_travel - cfg.limits_penalty * violations
+    if reason in ("off track", "barrier", "disqualified"):
         fitness -= cfg.crash_penalty + cfg.crash_speed_penalty * s.speed
     elif reason == "stuck":  # never cheaper than a fast crash, or standing still becomes attractive
         fitness -= cfg.crash_penalty + cfg.crash_speed_penalty * 60.0
     elif reason == "distance" and cfg.time_bonus:
         fitness += cfg.time_bonus * max(0.0, cfg.max_distance / cfg.ref_speed - s.t)
-    if lap_times and cfg.lap_bonus:  # finishing matters most; faster laps score more
-        fitness += lap_score(lap_times, cfg.laps, track.length)
+    clean = [t for t, ok in zip(lap_times, valid) if ok]
+    if clean and cfg.lap_bonus:  # finishing matters most; faster laps score more; deleted laps count for nothing
+        fitness += lap_score(clean, cfg.laps, track.length) if len(clean) == len(lap_times) else 1000.0 * len(clean)
     info = {"progress": progress, "laps": lap_times, "reason": reason, "time": s.t, "speed": s.speed,
-            "steer_travel": steer_travel, "track": cfg.track}
+            "steer_travel": steer_travel, "track": cfg.track, "violations": violations,
+            "laps_valid": valid}
     return (fitness, info, rows) if record else (fitness, info)
 
 
@@ -805,6 +846,7 @@ class LearnedDriver:
         if s.t + 1e-9 >= self._next_t:  # decide at 50 Hz, like in training
             self._next_t = s.t + CONTROL_DT
             self.i = self.track.nearest(s.x, s.y, self.i)
+            update_offtrack(car, CONTROL_DT)
             act = self.policy.act(observe(car, self.track, self.i))
             pedal = float(act[1])
             self._inp = Inputs(throttle=max(pedal, 0.0), brake=max(-pedal, 0.0),

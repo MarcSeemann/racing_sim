@@ -33,6 +33,12 @@ class Track:
     kerb_width: float = 1.5  # m of kerb outside each track edge
     width_left: np.ndarray | None = None  # m from the centreline to the left edge, per sample
     width_right: np.ndarray | None = None  # m from the centreline to the right edge, per sample
+    # Beyond the kerbs (carsim.runoff): run-off width (m) before the barrier on each side, and its
+    # surface ("grass", "asphalt" or "gravel"). None = the old open field of grass, no barrier.
+    runoff_left: np.ndarray | None = None
+    runoff_right: np.ndarray | None = None
+    runoff_kind_left: list | None = None
+    runoff_kind_right: list | None = None
 
     def __post_init__(self):
         if self.z is None:
@@ -55,6 +61,8 @@ class Track:
         self._yl = [float(v) for v in self.y]
         self._wl = [float(v) for v in self.width_left]
         self._wr = [float(v) for v in self.width_right]
+        self._rl = None if self.runoff_left is None else [float(v) for v in self.runoff_left]
+        self._rr = None if self.runoff_right is None else [float(v) for v in self.runoff_right]
 
     def _derive_vertical(self):
         ds = np.gradient(self.s)
@@ -74,7 +82,9 @@ class Track:
         z = np.array([z_of_s(v) for v in self.s])
         return Track(name or self.name, self.s, self.x, self.y, self.heading, self.curvature,
                      self.length, self.width, z, kerb_width=self.kerb_width,
-                     width_left=self.width_left, width_right=self.width_right)
+                     width_left=self.width_left, width_right=self.width_right,
+                     runoff_left=self.runoff_left, runoff_right=self.runoff_right,
+                     runoff_kind_left=self.runoff_kind_left, runoff_kind_right=self.runoff_kind_right)
 
     @classmethod
     def from_points(cls, name: str, x, y, z=None, width: float = 12.0, ds: float = 1.0, smooth: int = 7,
@@ -192,14 +202,25 @@ class Track:
         return (offset - (wl - wr) / 2) / ((wl + wr) / 2)
 
     def surface_at(self, offset: float, i: int | None = None) -> str:
-        """'track', 'kerb' or 'grass' for a lateral offset from the centreline (m), at index i
-        (without i: the nominal, symmetric width)."""
+        """'track', 'kerb', then the run-off ('grass', 'asphalt', 'gravel') and 'barrier' beyond it,
+        for a lateral offset from the centreline (m), at index i (without i: the nominal, symmetric
+        width). A track without run-off data is an open field of grass."""
         out = self.edge_beyond(i, offset) if i is not None else abs(offset) - self.width / 2
         if out <= 0:
             return "track"
         if out <= self.kerb_width:
             return "kerb"
-        return "grass"
+        if self._rl is None or i is None:
+            return "grass"
+        room = self._rl[i] if offset >= 0 else self._rr[i]
+        if out - self.kerb_width > room:
+            return "barrier"
+        return (self.runoff_kind_left if offset >= 0 else self.runoff_kind_right)[i]
+
+    def room_to_barrier(self, i: int, side: int) -> float:
+        """Run-off width (m) beyond the kerb on the left (side=+1) or right (-1); inf without data."""
+        r = self._rl if side > 0 else self._rr
+        return float("inf") if r is None else r[i]
 
     def index_at(self, s: float) -> int:
         return bisect.bisect_right(self._sl, s % self.length) - 1

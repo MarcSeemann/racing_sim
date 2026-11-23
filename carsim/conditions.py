@@ -115,6 +115,10 @@ class SurfaceParams:
     kerb_grip: float = 0.85
     grass_grip: float = 0.50
     grass_drag: float = 1500.0  # N per wheel on grass (rolling in soft ground)
+    runoff_grip: float = 0.85  # asphalt run-off: dusty, no rubber
+    gravel_grip: float = 0.45
+    gravel_drag: float = 4000.0  # N per wheel in a gravel trap: it is there to stop the car
+    gravel_bump: float = 0.02  # m
     drain_tau: float = 400.0  # s, standing water drains with this time constant
     evap_mm_h: float = 0.6  # evaporation on a 30 C track with light wind
     line_clear_per_lap: float = 0.25  # share of water a full field clears off its line each lap
@@ -182,7 +186,11 @@ class Conditions:
             grip *= self.rubber_grip(b) if on_line else self.sp.green_grip
         elif surf == "kerb":
             grip *= self.sp.kerb_grip
-        else:
+        elif surf == "asphalt":
+            grip *= self.sp.runoff_grip
+        elif surf == "gravel":
+            grip *= self.sp.gravel_grip
+        else:  # grass (and the barrier, where the run ends anyway)
             grip *= self.sp.grass_grip
         return grip, depth, surf
 
@@ -201,7 +209,12 @@ class Conditions:
             if a <= tr.kerb_width:
                 h += sp.kerb_height * math.sin(math.pi * a / tr.kerb_width) * (0.7 + 0.3 * math.sin(tau * s_wheel / sp.kerb_period))
             else:
-                h += sp.grass_bump * (0.6 * math.sin(tau * s_wheel / 3.7 + offset) + 0.4 * math.sin(tau * s_wheel / 1.3))
+                kind = tr.surface_at(offset, i if i is not None else tr.index_at(s_wheel))
+                if kind == "asphalt":
+                    pass  # smooth
+                else:
+                    bump = sp.gravel_bump if kind == "gravel" else sp.grass_bump
+                    h += bump * (0.6 * math.sin(tau * s_wheel / 3.7 + offset) + 0.4 * math.sin(tau * s_wheel / 1.3))
         return h
 
     def vertical(self, i: int):
