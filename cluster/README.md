@@ -39,6 +39,11 @@ image (below). Jobs then run with `--containall` and see only their read-only co
 
     cluster/install.sh hyperion
 
+If your home directory is short on quota, or the system Python is older than 3.10, put it on
+scratch and take Python from a module (`module avail Python`):
+
+    cluster/install.sh hyperion --base /scratch/<user>/carsim-claude --module Python/3.11.3-GCCcore-12.3.0
+
 It makes `~/.ssh/claude_carsim_hyperion`, installs the gateway and a venv with numpy and scipy, adds
 the restricted key to `authorized_keys`, writes `cluster/cluster.env` (git-ignored) and runs
 `cluster/ctl info`. Then, on the cluster, set the partition/account and limits:

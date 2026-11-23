@@ -1,21 +1,35 @@
 #!/usr/bin/env bash
 # One-time setup of the Claude gateway on a SLURM cluster, using YOUR normal SSH access.
 #
-#   cluster/install.sh hyperion            # an alias from ~/.ssh/config (or user@host)
-#   cluster/install.sh hyperion --no-venv  # skip creating the Python venv on the cluster
+#   cluster/install.sh hyperion                                   # everything in ~/carsim-claude
+#   cluster/install.sh hyperion --base /scratch/me/carsim-claude  # on scratch (home over quota)
+#   cluster/install.sh hyperion --module Python/3.11.3-GCCcore-12.3.0   # python from a module
+#   cluster/install.sh hyperion --no-venv                         # skip the Python venv
 #
 # 1. makes a new key ~/.ssh/claude_carsim_<alias> just for the gateway (ed25519, no passphrase:
 #    it can only ever run the gateway),
-# 2. installs cluster/gateway.sh as ~/carsim-claude/bin/gateway and a gateway.conf (if none yet),
-# 3. creates ~/carsim-claude/venv with numpy and scipy (unless --no-venv),
+# 2. installs cluster/gateway.sh as <base>/bin/gateway and a gateway.conf (if none yet),
+# 3. creates <base>/venv with numpy and scipy (unless --no-venv),
 # 4. adds the key to ~/.ssh/authorized_keys on the cluster as
-#        restrict,command="<home>/carsim-claude/bin/gateway" ssh-ed25519 ... claude-carsim
-# 5. writes cluster/cluster.env here and checks that `cluster/ctl help` works.
-# Undo: delete that authorized_keys line (and ~/carsim-claude/ if you want).
+#        restrict,command="CARSIM_GW_BASE=<base> <base>/bin/gateway" ssh-ed25519 ... claude-carsim
+# 5. writes cluster/cluster.env here and checks that `cluster/ctl info` works.
+# Re-running is safe: existing key, conf, venv and authorized_keys line are kept.
+# Undo: delete that authorized_keys line (and <base> if you want).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TARGET="${1:?usage: cluster/install.sh <ssh alias or user@host> [--no-venv]}"
-VENV=1; [[ "${2:-}" == "--no-venv" ]] && VENV=0
+TARGET="${1:?usage: cluster/install.sh <ssh alias or user@host> [--base DIR] [--module NAME] [--no-venv]}"
+shift
+BASE='$HOME/carsim-claude'; MODULE=""; VENV=1
+while (( $# )); do
+  case "$1" in
+    --base) BASE="${2:?--base needs a directory}"; shift 2 ;;
+    --module) MODULE="${2:?--module needs a module name}"; shift 2 ;;
+    --no-venv) VENV=0; shift ;;
+    *) echo "unknown option $1" >&2; exit 2 ;;
+  esac
+done
+[[ "$BASE" =~ ^[A-Za-z0-9_./\$-]+$ ]] || { echo "--base: plain path please" >&2; exit 2; }
+[[ -z "$MODULE" || "$MODULE" =~ ^[A-Za-z0-9_./+-]+$ ]] || { echo "--module: bad name" >&2; exit 2; }
 alias_clean="$(echo "$TARGET" | tr -c 'A-Za-z0-9_-' '_')"
 KEY="$HOME/.ssh/claude_carsim_${alias_clean%_}"
 
@@ -27,25 +41,40 @@ echo "cluster: $user@$host port $port"
 [[ -f "$KEY" ]] || ssh-keygen -q -t ed25519 -N "" -C "claude-carsim" -f "$KEY"
 pub="$(cat "$KEY.pub")"
 
+# Shell lines that make the module's python available (in the installer and in every job).
+LOAD=""
+[[ -n "$MODULE" ]] && LOAD="source /etc/profile >/dev/null 2>&1 || true; module load $MODULE"
+
 echo "== checking the cluster"
-ssh "$TARGET" 'for c in sbatch squeue sacct scancel git python3 apptainer singularity; do printf "%-12s %s\n" "$c" "$(command -v $c || echo -)"; done; python3 --version'
+B="$(ssh "$TARGET" "echo $BASE")"   # the base with \$HOME expanded on the cluster
+echo "base: $B"
+ssh "$TARGET" "for c in sbatch squeue sacct scancel git apptainer singularity; do printf '%-12s %s\n' \$c \"\$(command -v \$c || echo -)\"; done
+  $LOAD
+  python3 --version"
 
 echo "== installing the gateway"
-ssh "$TARGET" 'mkdir -p ~/carsim-claude/bin && chmod 750 ~/carsim-claude'
-ssh "$TARGET" 'cat > ~/carsim-claude/bin/gateway && chmod 500 ~/carsim-claude/bin/gateway' < "$HERE/gateway.sh"
-ssh "$TARGET" 'cat > ~/carsim-claude/carsim.def' < "$HERE/carsim.def"
-ssh "$TARGET" '[ -f ~/carsim-claude/gateway.conf ] || { cat > ~/carsim-claude/gateway.conf && chmod 400 ~/carsim-claude/gateway.conf; }' < "$HERE/gateway.conf.example"
+ssh "$TARGET" "mkdir -p '$B/bin' && chmod 750 '$B'"
+ssh "$TARGET" "cat > '$B/bin/gateway.new' && chmod 500 '$B/bin/gateway.new' && mv -f '$B/bin/gateway.new' '$B/bin/gateway'" < "$HERE/gateway.sh"
+ssh "$TARGET" "cat > '$B/carsim.def'" < "$HERE/carsim.def"
+{ cat "$HERE/gateway.conf.example"
+  echo
+  echo "# set by install.sh"
+  echo "PYTHON=\"$B/venv/bin/python\""
+  echo "SETUP_ENV=\"$LOAD\""
+} | ssh "$TARGET" "[ -f '$B/gateway.conf' ] && cat >/dev/null || { cat > '$B/gateway.conf' && chmod 400 '$B/gateway.conf'; }"
 
 if (( VENV )); then
   echo "== python venv (numpy, scipy)"
-  ssh "$TARGET" 'set -e; [ -x ~/carsim-claude/venv/bin/python ] || python3 -m venv ~/carsim-claude/venv
-                 ~/carsim-claude/venv/bin/pip install -q --upgrade pip "numpy>=1.24" "scipy>=1.10"
-                 ~/carsim-claude/venv/bin/python -c "import sys,numpy,scipy; print(sys.version.split()[0], numpy.__version__, scipy.__version__)"'
+  ssh "$TARGET" "set -e; $LOAD
+    python3 -c 'import sys; assert sys.version_info >= (3, 10), \"python \" + sys.version.split()[0] + \" is too old: carsim needs 3.10+ (use --module)\"'
+    [ -x '$B/venv/bin/python' ] || python3 -m venv '$B/venv'
+    '$B/venv/bin/pip' install -q --upgrade pip 'numpy>=1.24' 'scipy>=1.10'
+    '$B/venv/bin/python' -c 'import sys,numpy,scipy; print(sys.version.split()[0], numpy.__version__, scipy.__version__)'"
 fi
 
 echo "== authorising the restricted key"
 ssh "$TARGET" "set -e; mkdir -p ~/.ssh; chmod 700 ~/.ssh; touch ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys
-  grep -qF '${pub#* }' ~/.ssh/authorized_keys || echo \"restrict,command=\\\"\$HOME/carsim-claude/bin/gateway\\\" $pub\" >> ~/.ssh/authorized_keys
+  grep -qF '${pub#* }' ~/.ssh/authorized_keys || echo 'restrict,command=\"CARSIM_GW_BASE=$B $B/bin/gateway\" $pub' >> ~/.ssh/authorized_keys
   grep -F 'claude-carsim' ~/.ssh/authorized_keys"
 
 cat > "$HERE/cluster.env" <<ENV
@@ -56,4 +85,4 @@ CLUSTER_KEY=$KEY
 ENV
 echo "== test: cluster/ctl info"
 "$HERE/ctl" info
-echo "done. Edit ~/carsim-claude/gateway.conf on the cluster for partition/account/limits (chmod u+w first)."
+echo "done. Edit $B/gateway.conf on the cluster for partition/account/limits (chmod u+w first)."

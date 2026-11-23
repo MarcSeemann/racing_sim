@@ -78,7 +78,9 @@ help)
 info)
   sinfo -s || true
   echo "limits: MAX_CPUS=$MAX_CPUS MAX_HOURS=$MAX_HOURS MAX_JOBS=$MAX_JOBS partition=${PARTITION:-default} account=${ACCOUNT:-default} qos=${QOS:-default}"
-  "$PYTHON" -c 'import sys, numpy, scipy; print("python", sys.version.split()[0], "numpy", numpy.__version__, "scipy", scipy.__version__)' 2>&1 || echo "python env not ready: $PYTHON" ;;
+  ( eval "$SETUP_ENV" >/dev/null 2>&1 || true
+    "$PYTHON" -c 'import sys, numpy, scipy; print("python", sys.version.split()[0], "numpy", numpy.__version__, "scipy", scipy.__version__)' ) 2>&1 \
+    || echo "python env not ready: $PYTHON" ;;
 
 status)
   echo "JOBID NAME STATE ELAPSED LIMIT REASON"; claude_jobs ;;
