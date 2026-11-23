@@ -39,7 +39,7 @@ import dataclasses
 from . import thermal
 from .conditions import COMPOUNDS, Conditions
 from .aero import aero_forces, ride_heights
-from .params import G, CarParams, Environment, brake_friction
+from .params import G, CarParams, Environment, brake_friction, pressure_at_altitude
 from .powertrain import RPM_TO_RADS, engine_torque, full_throttle_torque, overall_ratio, peak_power
 from .tyres import TyreConsts, combined_fast
 from .vehicle import Inputs  # noqa: F401  (re-exported: same inputs plus steer)
@@ -118,6 +118,9 @@ class Car2D:
                  compound: str = "slick"):
         self.p = params or CarParams()
         self.env = dataclasses.replace(env) if env else Environment()
+        altitude = getattr(getattr(conditions, "track", None), "altitude_m", None)
+        if env is None and altitude is not None:  # thinner air up high (Mexico City: ~22 % less)
+            self.env.pressure_pa = pressure_at_altitude(altitude)
         self.cond = conditions
         self.compound = COMPOUNDS[compound]
         # Each compound has its own temperature window and wear rate.

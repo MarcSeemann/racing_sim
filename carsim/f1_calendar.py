@@ -87,15 +87,16 @@ def track_names(include_cancelled: bool = True) -> list:
     return [PREFIX + c.key for c in CALENDAR if include_cancelled or not c.cancelled]
 
 
-def load(key: str):
-    """The Track of calendar circuit `key` (without the "f1:" prefix)."""
-    from .circuits import load_tum_csv, monza
+def load(key: str, elevation: bool = True):
+    """The Track of calendar circuit `key` (without the "f1:" prefix), with its height profile
+    (data/tracks/elevation/<key>.csv, tools/build_elevation.py) unless elevation=False."""
+    from .circuits import load_tum_csv, monza, with_elevation
     if key not in BY_KEY:
         raise KeyError(f"unknown calendar circuit {key!r}: choose from {', '.join(BY_KEY)}")
     if key == "monza":
-        return monza()  # the very same Monza as get_track("monza")
-    c = BY_KEY[key]
-    return load_tum_csv(DATA / f"{key}.csv", c.name)
+        return monza(elevation)  # the very same Monza as get_track("monza")
+    tr = load_tum_csv(DATA / f"{key}.csv", BY_KEY[key].name)
+    return with_elevation(tr, key) if elevation else tr
 
 
 # ---- report: drive a trained driver round the calendar -------------------------------------

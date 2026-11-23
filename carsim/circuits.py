@@ -41,12 +41,29 @@ def load_tum_csv(path, name: str, ds: float = 1.0) -> Track:
     return Track.from_points(name, xs, ys, ds=ds, smooth=5, width_left=wl, width_right=wr)
 
 
-def monza() -> Track:
+ELEVATION = DATA / "elevation"  # <key>.csv: s_m, z_m (m above sea level), tools/build_elevation.py
+
+
+def with_elevation(track: Track, key: str) -> Track:
+    """The track with its surveyed height profile, if there is one (and `altitude_m`, the mean
+    height above sea level, which sets the air pressure). Unchanged if there is no file."""
+    f = ELEVATION / f"{key}.csv"
+    if not f.exists():
+        return track
+    d = np.loadtxt(f, delimiter=",", comments="#")
+    s_m, z_m = d[:, 0], d[:, 1]
+    out = track.with_elevation(lambda s: float(np.interp(s, s_m, z_m, period=track.length)))
+    out.altitude_m = float(z_m.mean())
+    return out
+
+
+def monza(elevation: bool = True) -> Track:
     """Autodromo Nazionale Monza, the F1 layout (5.793 km officially), run clockwise.
 
-    The lap starts on the main straight, just before the start/finish line; no elevation
-    (Monza is nearly flat; the data has none)."""
-    return load_tum_csv(DATA / "monza.csv", "Monza")
+    The lap starts on the main straight, just before the start/finish line. Heights from
+    data/tracks/elevation/monza.csv (terrain model, smoothed) unless elevation=False."""
+    tr = load_tum_csv(DATA / "monza.csv", "Monza")
+    return with_elevation(tr, "monza") if elevation else tr
 
 
 NAMED = {"short": short_circuit, "test": long_circuit, "hill": hill_circuit, "monza": monza}

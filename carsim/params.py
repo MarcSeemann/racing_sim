@@ -174,6 +174,11 @@ def brake_friction(b: Brakes, temp_c: float) -> float:
     return 1.0
 
 
+def pressure_at_altitude(altitude_m: float) -> float:
+    """Standard-atmosphere air pressure (Pa) at a height above sea level."""
+    return 101325.0 * (1.0 - 2.25577e-5 * altitude_m) ** 5.25588
+
+
 @dataclass
 class Environment:
     air_temp_c: float = 20.0

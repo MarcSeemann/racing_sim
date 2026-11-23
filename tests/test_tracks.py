@@ -115,7 +115,8 @@ def test_monza_matches_the_real_circuit():
     assert 8.5 < tr.width < 11  # between the white lines, from satellite images
     assert st["longest_straight_m"] > 800  # the main straight / run to the first chicane
     assert 8 < st["min_radius_m"] < 20  # the chicanes
-    assert tr.z.max() == tr.z.min() == 0.0
+    assert 5 < np.ptp(tr.z) < 30  # gentle: terrain model, see data/tracks/elevation/monza.csv
+    assert np.ptp(monza(elevation=False).z) == 0.0
 
 
 # ---- the 2025 car ---------------------------------------------------------------------

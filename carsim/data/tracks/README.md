@@ -27,3 +27,17 @@ Built by `tools/build_f1_2026.py` from two pinned sources:
 
 Each file says in its header which source it came from. Coordinates are metres east/north of the
 circuit's centre (TUM files: TUM's own frame). No elevation for any of them.
+
+## Elevation (`elevation/<key>.csv`: s_m, z_m)
+
+Height above sea level along the lap for every calendar circuit (and Monza), built by
+`tools/build_elevation.py`: each centreline is fitted onto its f1-circuits GeoJSON trace (lon/lat),
+the ground height is looked up every 10 m from OpenTopoData (EU-DEM 25 m in Europe, SRTM 30 m
+elsewhere), then smoothed (running median 150 m, Gaussian 30 m). Terrain models measure the
+surface, so expect a few metres of error, more under trees. The mean height also sets the air
+pressure at the circuit (`Track.altitude_m`; Mexico City: ~24 % lower air density).
+
+Where the terrain model plainly sees buildings, stands or a tunnel instead of the road (Singapore,
+Monaco, Las Vegas, Mexico City), the circuit is kept flat at its mean height; each file's header
+says which. EU-DEM is © European Union, Copernicus Land Monitoring Service; SRTM is public domain
+(NASA/USGS).
