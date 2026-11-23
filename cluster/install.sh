@@ -5,6 +5,8 @@
 #   cluster/install.sh hyperion --base /scratch/me/carsim-claude  # on scratch (home over quota)
 #   cluster/install.sh hyperion --module Python/3.11.3-GCCcore-12.3.0   # python from a module
 #   cluster/install.sh hyperion --no-venv                         # skip the Python venv
+#   cluster/install.sh hyperion --module Miniforge3 --python /scratch/me/envs/carsim_venv/bin/python
+#                                                   # use a venv you already have (implies --no-venv)
 #
 # 1. makes a new key ~/.ssh/claude_carsim_<alias> just for the gateway (ed25519, no passphrase:
 #    it can only ever run the gateway),
@@ -19,17 +21,19 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET="${1:?usage: cluster/install.sh <ssh alias or user@host> [--base DIR] [--module NAME] [--no-venv]}"
 shift
-BASE='$HOME/carsim-claude'; MODULE=""; VENV=1
+BASE='$HOME/carsim-claude'; MODULE=""; VENV=1; PY=""
 while (( $# )); do
   case "$1" in
     --base) BASE="${2:?--base needs a directory}"; shift 2 ;;
     --module) MODULE="${2:?--module needs a module name}"; shift 2 ;;
     --no-venv) VENV=0; shift ;;
+    --python) PY="${2:?--python needs the path of a python binary}"; VENV=0; shift 2 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
 [[ "$BASE" =~ ^[A-Za-z0-9_./\$-]+$ ]] || { echo "--base: plain path please" >&2; exit 2; }
 [[ -z "$MODULE" || "$MODULE" =~ ^[A-Za-z0-9_./+-]+$ ]] || { echo "--module: bad name" >&2; exit 2; }
+[[ -z "$PY" || "$PY" =~ ^[A-Za-z0-9_./\$-]+$ ]] || { echo "--python: plain path please" >&2; exit 2; }
 alias_clean="$(echo "$TARGET" | tr -c 'A-Za-z0-9_-' '_')"
 KEY="$HOME/.ssh/claude_carsim_${alias_clean%_}"
 
@@ -43,11 +47,12 @@ pub="$(cat "$KEY.pub")"
 
 # Shell lines that make the module's python available (in the installer and in every job).
 LOAD=""
-[[ -n "$MODULE" ]] && LOAD="source /etc/profile >/dev/null 2>&1 || true; module load $MODULE"
+[[ -n "$MODULE" ]] && LOAD="source /etc/profile >/dev/null 2>&1 || true; module purge; module load $MODULE"
 
 echo "== checking the cluster"
 B="$(ssh "$TARGET" "echo $BASE")"   # the base with \$HOME expanded on the cluster
 echo "base: $B"
+[[ -n "$PY" ]] || PY="$B/venv/bin/python"
 ssh "$TARGET" "for c in sbatch squeue sacct scancel git apptainer singularity; do printf '%-12s %s\n' \$c \"\$(command -v \$c || echo -)\"; done
   $LOAD
   python3 --version"
@@ -59,7 +64,7 @@ ssh "$TARGET" "cat > '$B/carsim.def'" < "$HERE/carsim.def"
 { cat "$HERE/gateway.conf.example"
   echo
   echo "# set by install.sh"
-  echo "PYTHON=\"$B/venv/bin/python\""
+  echo "PYTHON=\"$PY\""
   echo "SETUP_ENV=\"$LOAD\""
 } | ssh "$TARGET" "[ -f '$B/gateway.conf' ] && cat >/dev/null || { cat > '$B/gateway.conf' && chmod 400 '$B/gateway.conf'; }"
 
@@ -71,6 +76,10 @@ if (( VENV )); then
     '$B/venv/bin/pip' install -q --upgrade pip 'numpy>=1.24' 'scipy>=1.10'
     '$B/venv/bin/python' -c 'import sys,numpy,scipy; print(sys.version.split()[0], numpy.__version__, scipy.__version__)'"
 fi
+
+echo "== checking the python the jobs will use: $PY"
+ssh "$TARGET" "$LOAD
+  '$PY' -c 'import sys, numpy, scipy; assert sys.version_info >= (3, 10), \"python \" + sys.version.split()[0] + \" is too old: carsim needs 3.10+\"; print(\"python\", sys.version.split()[0], \"numpy\", numpy.__version__, \"scipy\", scipy.__version__)'"
 
 echo "== authorising the restricted key"
 ssh "$TARGET" "set -e; mkdir -p ~/.ssh; chmod 700 ~/.ssh; touch ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys
