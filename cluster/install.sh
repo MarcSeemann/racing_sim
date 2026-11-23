@@ -8,6 +8,8 @@
 #   cluster/install.sh hyperion --module Miniforge3 --python /scratch/me/envs/carsim_venv/bin/python
 #                                                   # use a venv you already have (implies --no-venv)
 #   cluster/install.sh hyperion --key-type rsa      # if the cluster does not accept ed25519 user keys
+#   cluster/install.sh hyperion --own-login ...     # cluster ignores keys you add yourself: no new key,
+#                                                   # cluster/ctl logs in as you and runs only the gateway
 #
 # 1. makes a new key ~/.ssh/claude_carsim_<alias> just for the gateway (ed25519, no passphrase:
 #    it can only ever run the gateway),
@@ -22,12 +24,13 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET="${1:?usage: cluster/install.sh <ssh alias or user@host> [--base DIR] [--module NAME] [--no-venv]}"
 shift
-BASE='$HOME/carsim-claude'; MODULE=""; VENV=1; PY=""; KTYPE="ed25519"
+BASE='$HOME/carsim-claude'; MODULE=""; VENV=1; PY=""; KTYPE="ed25519"; OWN=0
 while (( $# )); do
   case "$1" in
     --base) BASE="${2:?--base needs a directory}"; shift 2 ;;
     --module) MODULE="${2:?--module needs a module name}"; shift 2 ;;
     --no-venv) VENV=0; shift ;;
+    --own-login) OWN=1; shift ;;
     --key-type) KTYPE="${2:?--key-type ed25519|rsa}"; shift 2 ;;
     --python) PY="${2:?--python needs the path of a python binary}"; VENV=0; shift 2 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
@@ -46,11 +49,11 @@ user="$(ssh -G "$TARGET" | awk '$1=="user"{print $2}')"
 port="$(ssh -G "$TARGET" | awk '$1=="port"{print $2}')"
 echo "cluster: $user@$host port $port"
 
-if [[ ! -f "$KEY" ]]; then
+if (( ! OWN )) && [[ ! -f "$KEY" ]]; then
   if [[ "$KTYPE" == rsa ]]; then ssh-keygen -q -t rsa -b 4096 -N "" -C "claude-carsim" -f "$KEY"
   else ssh-keygen -q -t ed25519 -N "" -C "claude-carsim" -f "$KEY"; fi
 fi
-pub="$(cat "$KEY.pub")"
+(( OWN )) || pub="$(cat "$KEY.pub")"
 
 # Shell lines that make the module's python available (in the installer and in every job).
 LOAD=""
@@ -87,6 +90,15 @@ fi
 echo "== checking the python the jobs will use: $PY"
 ssh "$TARGET" "$LOAD
   '$PY' -c 'import sys, numpy, scipy; assert sys.version_info >= (3, 10), \"python \" + sys.version.split()[0] + \" is too old: carsim needs 3.10+\"; print(\"python\", sys.version.split()[0], \"numpy\", numpy.__version__, \"scipy\", scipy.__version__)'"
+
+if (( OWN )); then
+  [[ "$TARGET" =~ ^[A-Za-z0-9_.@-]+$ ]] || { echo "--own-login needs a plain ssh alias" >&2; exit 2; }
+  printf 'CLUSTER_ALIAS=%s\nCLUSTER_BASE=%s\n' "$TARGET" "$B" > "$HERE/cluster.env"
+  echo "== test: cluster/ctl info (your own login, gateway only)"
+  "$HERE/ctl" info
+  echo "done. Edit $B/gateway.conf on the cluster for partition/account/limits (chmod u+w first)."
+  exit 0
+fi
 
 echo "== authorising the restricted key"
 ssh "$TARGET" "set -e; mkdir -p ~/.ssh; chmod 700 ~/.ssh; touch ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys

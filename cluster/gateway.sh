@@ -78,7 +78,7 @@ help)
 info)
   sinfo -s || true
   echo "limits: MAX_CPUS=$MAX_CPUS MAX_HOURS=$MAX_HOURS MAX_JOBS=$MAX_JOBS partition=${PARTITION:-default} account=${ACCOUNT:-default} qos=${QOS:-default}"
-  ( eval "$SETUP_ENV" >/dev/null 2>&1 || true
+  ( set +eu; eval "$SETUP_ENV" >/dev/null 2>&1
     "$PYTHON" -c 'import sys, numpy, scipy; print("python", sys.version.split()[0], "numpy", numpy.__version__, "scipy", scipy.__version__)' ) 2>&1 \
     || echo "python env not ready: $PYTHON" ;;
 
@@ -143,7 +143,9 @@ submit)
     [[ -n "$ACCOUNT" ]] && echo "#SBATCH --account=$ACCOUNT"
     [[ -n "$QOS" ]] && echo "#SBATCH --qos=$QOS"
     echo "set -euo pipefail"
+    echo "set +eu  # module and profile scripts use unset variables"
     echo "$SETUP_ENV"
+    echo "set -eu"
     echo "echo \"commit $full  run $run  host \$(hostname)  start \$(date -Is)\""
     if [[ -n "$CONTAINER" ]]; then
       for pre in APPTAINERENV SINGULARITYENV; do

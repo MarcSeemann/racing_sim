@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
-# Local client for the cluster gateway (cluster/gateway.sh). Uses ONLY the restricted key, so every
-# call lands in the gateway's verb list, never in a shell.
+# Local client for the cluster gateway (cluster/gateway.sh). Every call lands in the gateway's verb
+# list, never in a shell of its own choosing.
+#
+# Two ways to connect (cluster/cluster.env):
+#   restricted key   CLUSTER_HOST, CLUSTER_USER, CLUSTER_PORT, CLUSTER_KEY: a key the cluster lets run
+#                    only the gateway (forced command; the cluster enforces it)
+#   your own login   CLUSTER_ALIAS (ssh config alias), CLUSTER_BASE: for clusters that only accept
+#                    centrally registered keys. This script still runs nothing but the gateway: the
+#                    request goes over base64-encoded, so no character of it reaches the remote shell;
+#                    the limit is enforced here and by Claude Code's permission rules, not by the cluster.
 #
 #   cluster/ctl status | info | runs | history [days] | help
 #   cluster/ctl push-code                       send this repo's branches (committed code only)
@@ -13,13 +21,24 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 [[ -f "$HERE/cluster.env" ]] || { echo "cluster/cluster.env missing (run cluster/install.sh)" >&2; exit 2; }
 # shellcheck source=/dev/null
-source "$HERE/cluster.env"   # CLUSTER_HOST, CLUSTER_USER, CLUSTER_PORT, CLUSTER_KEY
+source "$HERE/cluster.env"
 
-SSH=(ssh -F /dev/null -i "$CLUSTER_KEY" -p "${CLUSTER_PORT:-22}"
-     -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes -o StrictHostKeyChecking=yes
-     -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ConnectTimeout=20
-     -o ServerAliveInterval=30 "$CLUSTER_USER@$CLUSTER_HOST")
-gw() { SSH_AUTH_SOCK="" "${SSH[@]}" "$*"; }
+if [[ -n "${CLUSTER_ALIAS:-}" ]]; then
+  [[ "$CLUSTER_ALIAS" =~ ^[A-Za-z0-9_.@-]+$ && "${CLUSTER_BASE:-}" =~ ^/[A-Za-z0-9_./-]+$ ]] \
+    || { echo "cluster.env: bad CLUSTER_ALIAS or CLUSTER_BASE" >&2; exit 2; }
+  SSH=(ssh -o BatchMode=yes -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes
+       -o ConnectTimeout=20 -o ServerAliveInterval=30 "$CLUSTER_ALIAS")
+  gw() {
+    local b64; b64="$(printf '%s' "$*" | base64 -w0)"   # [A-Za-z0-9+/=] only: inert in any shell
+    "${SSH[@]}" "CARSIM_GW_BASE=$CLUSTER_BASE SSH_ORIGINAL_COMMAND=\"\$(printf %s $b64 | base64 -d)\" $CLUSTER_BASE/bin/gateway"
+  }
+else
+  SSH=(ssh -F /dev/null -i "$CLUSTER_KEY" -p "${CLUSTER_PORT:-22}"
+       -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes -o StrictHostKeyChecking=yes
+       -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ConnectTimeout=20
+       -o ServerAliveInterval=30 "$CLUSTER_USER@$CLUSTER_HOST")
+  gw() { SSH_AUTH_SOCK="" "${SSH[@]}" "$*"; }
+fi
 
 verb="${1:-help}"; shift || true
 case "$verb" in
