@@ -163,6 +163,7 @@ Use these names with `--track` anywhere:
     short, test, hill              made-up circuits (1.1 km, 2.5 km, 2.5 km with 23 m of elevation)
     monza                          Autodromo Nazionale Monza, 5.79 km, real centreline and widths
     random:<seed>                  a random circuit, the same one for the same seed
+    f1:<key>                       the 24 circuits of the 2026 F1 calendar (held out, see below)
 
 Track width can vary round the lap, and differently on each side of the centreline
 (`Track.width_left`, `Track.width_right`). Monza comes from the
@@ -171,6 +172,28 @@ Track width can vary round the lap, and differently on each side of the centreli
 satellite images (about 9.4 m on average), no elevation.
 
 ![Monza and random circuits](docs/images/circuits_report.png)
+
+### The 2026 F1 calendar: a held-out test set
+
+All 24 circuits of the 2026 calendar (`carsim/f1_calendar.py`, `f1:melbourne` ... `f1:yas_marina`;
+Bahrain and Saudi Arabia, cancelled during the season, are kept). Like Monza they are an exam,
+never practice: `learn.py train` refuses them as training or validation tracks, so no driver is
+ever trained on them or picked by them. Drive a trained driver round the lot (nothing is saved
+into the run):
+
+    python -m carsim.f1_calendar list                                    # rounds, lengths, widths, data source
+    python -m carsim.f1_calendar drive --policy random --laps 3 --csv calendar.csv
+    python -m carsim.learn drive --policy random --track f1:suzuka       # one circuit
+    python analysis/calendar_report.py                                   # the maps below
+
+12 circuits (and Monza) are the TUM survey unchanged; Melbourne, Barcelona, Zandvoort and Yas
+Marina were rebuilt after the survey, so they keep it where the layout is unchanged and take the
+current layout from the [f1-circuits](https://github.com/bacinger/f1-circuits) traces (MIT) where
+it changed; Jeddah, Miami, Monaco, Madring, Baku, Singapore, Las Vegas and Lusail have only the
+traced centreline, with a nominal 12 m width (Monaco 9 m). All are within 1 % of the official lap
+length. `tools/build_f1_2026.py` rebuilds the files from pinned copies of both sources.
+
+![The 2026 calendar](docs/images/calendar_report.png)
 
 The car on real circuits is `f1_2025()`: built to the 2025 F1 rules (800 kg with driver,
 3.60 m wheelbase, 2.0 m wide, 18-inch wheels), with a choice of wing (`downforce="low"` for

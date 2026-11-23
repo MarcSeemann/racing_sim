@@ -64,6 +64,7 @@ from .circuits import TRACKS, get_track, track_arg
 from .conditions import Conditions, Weather
 from .drivers import auto_gear
 from .dynamics import Car2D
+from .f1_calendar import is_calendar
 from .params import CarParams, race_car
 from .racing_line import cached_racing_line
 from .vehicle import Inputs
@@ -614,6 +615,10 @@ def test_configs(cfg: TrainConfig) -> list:
 def train(cfg: TrainConfig, workers: int = 2, generations: int | None = None, hours: float | None = None,
           log=print, init_from: str | None = None, carry_over: bool = False):
     """Train (or continue training) the driver for cfg's track(s). Ctrl+C stops after saving."""
+    hidden_from_training = [n for n in (*cfg.track_list(), *cfg.validation) if is_calendar(n)]
+    if hidden_from_training:  # the F1 calendar is a held-out test set: never practised on, never picks
+        raise ValueError(f"{', '.join(hidden_from_training)}: the F1 calendar circuits are held out (report "
+                         "only); drive them with python -m carsim.f1_calendar drive")
     out = run_dir(cfg.run_name())
     rng = np.random.default_rng(cfg.seed)
     policy = Policy(N_OBS, cfg.hidden).init_random(rng)
@@ -804,6 +809,9 @@ def main(argv=None):
 
     if a.cmd == "train":
         tracks = tuple(x.strip() for x in a.tracks.split(",")) if a.tracks else ()
+        if any(is_calendar(n) for n in (a.track, *tracks)):
+            ap.error("the f1:<key> circuits (2026 calendar) are a held-out test set and are never trained on; "
+                     "drive them with: python -m carsim.f1_calendar drive --policy <run>")
         for n in tracks:
             if n not in TRACKS or n == "random":
                 ap.error(f"unknown track {n!r} (short, test, hill, monza, random:<seed> or power:<seed>)")

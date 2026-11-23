@@ -20,3 +20,8 @@ ai_runs/
 # cluster gateway: local connection settings and downloaded runs
 cluster/cluster.env
 cluster_runs/
+.claude/settings.local.json
+
+# notebook simulation cache (rebuilt when a run saves a new driver)
+notebooks/cache/
+.ipynb_checkpoints/

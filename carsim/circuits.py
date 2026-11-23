@@ -6,6 +6,8 @@
     get_track("monza")       Autodromo Nazionale Monza, 5.79 km, real centreline and widths
     get_track("random:42")   a random circuit (carsim.trackgen), the same one for the same seed
     get_track("power:42")    a random Monza-like circuit: narrow, long straights, tight chicanes
+    get_track("f1:suzuka")   a circuit of the 2026 F1 calendar (carsim.f1_calendar): a HELD-OUT
+                             test set, never trained on (learn.py refuses it as a training track)
 
 Real circuits come from surveyed data in carsim/data/tracks (see the README there for
 sources and licence).
@@ -52,7 +54,11 @@ REAL = {"monza"}  # circuits built from survey data
 
 
 def get_track(name: str) -> Track:
-    """A circuit by name: one of NAMED, "random:<seed>" (also "random" = seed 0) or "power:<seed>"."""
+    """A circuit by name: one of NAMED, "random:<seed>" (also "random" = seed 0), "power:<seed>"
+    or "f1:<key>" (the 2026 calendar, carsim.f1_calendar)."""
+    if name.startswith("f1:"):
+        from . import f1_calendar
+        return f1_calendar.load(name[3:])
     if name.startswith("power:"):
         return power_track(int(name.partition(":")[2]))
     if name.startswith("random"):
@@ -74,8 +80,12 @@ def track_arg(value: str) -> str:
             return value
     if value.startswith("power:") and value.partition(":")[2].isdigit():
         return value
-    raise argparse.ArgumentTypeError(f"unknown track {value!r}: choose from {', '.join(NAMED)}, random:<seed> "
-                                     "or power:<seed>")
+    if value.startswith("f1:"):
+        from .f1_calendar import BY_KEY
+        if value[3:] in BY_KEY:
+            return value
+    raise argparse.ArgumentTypeError(f"unknown track {value!r}: choose from {', '.join(NAMED)}, random:<seed>, "
+                                     "power:<seed> or f1:<key> (python -m carsim.f1_calendar list)")
 
 
 class _Registry(dict):
