@@ -1,0 +1,11 @@
+# Apptainer/Singularity image for carsim training jobs (optional; see cluster/README.md).
+#   apptainer build ~/carsim-claude/carsim.sif carsim.def
+# then set CONTAINER="$HOME/carsim-claude/carsim.sif" in ~/carsim-claude/gateway.conf.
+Bootstrap: docker
+From: python:3.11-slim
+
+%post
+    pip install --no-cache-dir "numpy==2.2.6" "scipy==1.15.3"
+
+%runscript
+    exec python "$@"

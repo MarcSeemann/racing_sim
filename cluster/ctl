@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Local client for the cluster gateway (cluster/gateway.sh). Uses ONLY the restricted key, so every
+# call lands in the gateway's verb list, never in a shell.
+#
+#   cluster/ctl status | info | runs | history [days] | help
+#   cluster/ctl push-code                       send this repo's branches (committed code only)
+#   cluster/ctl submit <run> <cpus> <hours> [train flags...]   (uses the current HEAD commit)
+#   cluster/ctl cancel <jobid> | log <jobid> [lines] | progress <run> [lines]
+#   cluster/ctl get-run <run>                   download into cluster_runs/<run>/ (never into ai_runs/)
+#   cluster/ctl put-run <run> [local_run]       upload ai_runs/<local_run>/ as <run> (e.g. for --init-from)
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="$(cd "$HERE/.." && pwd)"
+[[ -f "$HERE/cluster.env" ]] || { echo "cluster/cluster.env missing (run cluster/install.sh)" >&2; exit 2; }
+# shellcheck source=/dev/null
+source "$HERE/cluster.env"   # CLUSTER_HOST, CLUSTER_USER, CLUSTER_PORT, CLUSTER_KEY
+
+SSH=(ssh -F /dev/null -i "$CLUSTER_KEY" -p "${CLUSTER_PORT:-22}"
+     -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes -o StrictHostKeyChecking=yes
+     -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ConnectTimeout=20
+     -o ServerAliveInterval=30 "$CLUSTER_USER@$CLUSTER_HOST")
+gw() { SSH_AUTH_SOCK="" "${SSH[@]}" "$*"; }
+
+verb="${1:-help}"; shift || true
+case "$verb" in
+push-code)
+  git -C "$REPO" diff --quiet HEAD -- carsim || echo "warning: uncommitted changes in carsim/ are NOT sent" >&2
+  tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
+  git -C "$REPO" bundle create -q "$tmp" --branches
+  gw push-code < "$tmp" ;;
+submit)
+  (( $# >= 3 )) || { echo "usage: cluster/ctl submit <run> <cpus> <hours> [train flags...]" >&2; exit 2; }
+  run="$1" cpus="$2" hours="$3"; shift 3
+  sha="$(git -C "$REPO" rev-parse HEAD)"
+  git -C "$REPO" diff --quiet HEAD -- carsim || echo "warning: uncommitted changes in carsim/ are not in commit ${sha:0:9}" >&2
+  gw submit "$run" "$sha" "$cpus" "$hours" "$@" ;;
+get-run)
+  run="${1:?run name}"; dst="$REPO/cluster_runs/$run"; mkdir -p "$dst"
+  tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
+  gw get-run "$run" > "$tmp"
+  tar -tf "$tmp" | grep -qvE '^(policy\.npy|config\.json|progress\.csv|checkpoint\.npz)$' && { echo "unexpected files in download" >&2; exit 2; }
+  tar -xf "$tmp" -C "$dst" && ls -l "$dst" ;;
+put-run)
+  run="${1:?run name on the cluster}"; src="$REPO/ai_runs/${2:-$1}"
+  files=(); for f in policy.npy config.json progress.csv checkpoint.npz; do [[ -f "$src/$f" ]] && files+=("$f"); done
+  (( ${#files[@]} )) || { echo "nothing to upload in $src" >&2; exit 2; }
+  tar -C "$src" -cf - "${files[@]}" | gw put-run "$run" ;;
+*)
+  gw "$verb" "$@" ;;
+esac

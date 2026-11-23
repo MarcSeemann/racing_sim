@@ -134,6 +134,28 @@ on pick the best driver, and Monza, which it never sees at all, is the exam:
 distances to each track edge, start with zero weight, so it drives exactly as before on day one).
 Runs from before this change keep working: the saved network's size tells which inputs it uses.
 
+**Getting it round Monza.** The ordinary random circuits are all wider than Monza (10.6 m at
+their narrowest, Monza 7.5–9.4 m), their corners are never tighter than R 15 m (Monza's first
+chicane is R 9 m), and their straights are shorter (median 430 m; Monza 940 m flat out into that
+chicane). A driver trained only on them weaves on Monza's narrow straight and spins. These options,
+all off by default so older runs resume unchanged, close the gap without ever showing it Monza:
+
+    python -m carsim.learn train --track random --init-from random --name monza-v2 --population 120 \
+        --starts 8 --tracks-per-gen 4 --power-share 0.4 --fast-corner-share 0.25 --steer-penalty 2
+
+| Option | What it does |
+| --- | --- |
+| `--power-share 0.4` | 40% of the new circuits are `power:<seed>`: Monza-like, 8–11 m wide, few corners on a 4.5–7 km lap (long straights), chicanes down to R 9 m. Adds `power:0` and `power:1` to the held-out circuits that pick the best driver |
+| `--fast-corner-share 0.25` | a quarter of the random starts are at 215–315 km/h, 150–450 m before a corner at the end of a long straight: the big stop |
+| `--steer-penalty 2` | practice runs lose 2 points per radian of steering travel, against the sawing at the wheel that makes it weave |
+| `--starts 8 --tracks-per-gen 4` | more practice per generation: a less noisy step |
+| `--name` | its own folder, `ai_runs/<name>/` |
+| `--test-laps` | laps of the unseen Monza test (default: `--laps`, so 3) |
+
+To get a Monza driver directly, fine-tune a copy on Monza itself:
+`python -m carsim.learn train --track monza --init-from monza-v2 --name monza-ft --fast-corner-share 0.25 --steer-penalty 2`.
+To run either on a SLURM cluster through a restricted SSH gateway, see [cluster/README.md](cluster/README.md).
+
 ## Circuits
 
 Use these names with `--track` anywhere:

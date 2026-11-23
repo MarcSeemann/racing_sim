@@ -194,3 +194,23 @@ def test_server_sends_track_edges():
     msg = sess.track_message()
     assert len(msg["width_left"]) == len(msg["x"]) == len(msg["width_right"])
     assert msg["wheelbase"] == 3.6
+
+
+# ---- Monza-like power circuits -----------------------------------------------------------
+def test_power_circuits_look_like_monza():
+    from carsim.trackgen import power_track
+    stats = [track_stats(power_track(s)) for s in range(8)]
+    assert all(s["width_mean_m"] < 11.5 for s in stats)  # narrower than every ordinary random circuit
+    assert min(s["width_min_m"] for s in stats) < 8.5  # Monza is 7.5 m at its narrowest
+    assert max(s["longest_straight_m"] for s in stats) > 800.0  # Monza: 940 m flat out
+    assert min(s["min_radius_m"] for s in stats) < 12.0  # Monza's first chicane is R ~9 m
+    assert power_track(3).length == get_track("power:3").length
+    assert track_arg("power:3") == "power:3" and "power:3" in TRACKS
+    tr = power_track(3)
+    assert _clear_of_itself(tr, 10.0)
+
+
+def test_ordinary_random_circuits_are_unchanged_by_the_power_option():
+    # held-out validation circuits must stay the same so old runs keep comparable scores
+    assert track_stats(random_track(0))["length_m"] == pytest.approx(4675, abs=1.0)
+    assert track_stats(random_track(1))["length_m"] == pytest.approx(2694, abs=1.0)

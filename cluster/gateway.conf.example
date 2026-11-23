@@ -1,0 +1,13 @@
+# ~/carsim-claude/gateway.conf on the cluster: limits and environment for the Claude gateway.
+# Only you edit this file (the gateway cannot write it).
+PYTHON="$HOME/carsim-claude/venv/bin/python"
+SETUP_ENV=""                # e.g. "module load Python/3.11.3-GCCcore-12.3.0"
+PARTITION=""                # empty = the cluster default
+ACCOUNT=""
+QOS=""
+MAX_CPUS=64                 # per job
+MAX_HOURS=48                # per job
+MAX_JOBS=4                  # claude-* jobs queued or running at once
+MEM_PER_CPU="1G"
+CONTAINER=""                # e.g. "$HOME/carsim-claude/carsim.sif" (see carsim.def) to run jobs in Apptainer
+CONTAINER_CMD="apptainer"

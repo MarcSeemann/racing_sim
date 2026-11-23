@@ -219,6 +219,7 @@ class EpisodeConfig:
     crash_speed_penalty: float = 0.0  # extra fitness lost per m/s of speed at impact (crashing slower is less bad)
     time_bonus: float = 0.0  # fitness per second saved reaching max_distance faster than ref_speed
     ref_speed: float = 15.0  # m/s; reaching the cap slower than this earns no time bonus
+    steer_penalty: float = 0.0  # fitness lost per rad the steering travels (sawing at the wheel)
     # The car and the track (realistic = the same car and conditions as the 3D view).
     realistic: bool = True  # False: the old training car (no fuel, tyres always optimal, no kerbs/grass)
     fuel_kg: float = 40.0
@@ -321,7 +322,7 @@ def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32,
         if len(lap_times) >= cfg.laps:
             reason = "lap"
             break
-    fitness = progress + cfg.alive_bonus * s.t
+    fitness = progress + cfg.alive_bonus * s.t - cfg.steer_penalty * steer_travel
     if reason == "off track":
         fitness -= cfg.crash_penalty + cfg.crash_speed_penalty * s.speed
     elif reason == "stuck":  # never cheaper than a fast crash, or standing still becomes attractive
@@ -369,6 +370,14 @@ class TrainConfig:
     test_track: str = "monza"  # never trained on, never used to pick: just reported
     test_every: int = 5  # generations between test-track runs
     init_from: str | None = None  # start a NEW run from another run's best driver (e.g. "short")
+    # Harder practice (all off by default, so older runs resume exactly as they were trained):
+    power_share: float = 0.0  # random mode: share of new circuits that are Monza-like "power:<seed>" ones
+    fast_corner_share: float = 0.0  # share of random starts at top speed into a corner after a long straight
+    fast_corner_speed: tuple = (60.0, 88.0)  # m/s start speeds for those runs (~215-315 km/h)
+    fast_corner_approach: tuple = (150.0, 450.0)  # m before the corner entry that those runs start
+    steer_penalty: float = 0.0  # practice runs: fitness lost per rad of steering travel
+    test_laps: int = 0  # laps of the unseen test circuit (0 = `laps`)
+    name: str | None = None  # run name (ai_runs/<name>/); default: from the track(s)
 
     @property
     def random(self) -> bool:
@@ -378,6 +387,8 @@ class TrainConfig:
         return list(self.tracks) if self.tracks else [self.track]
 
     def run_name(self) -> str:
+        if self.name:
+            return self.name
         t = self.track_list()
         return t[0] if len(t) == 1 else "multi_" + "-".join(t)
 
@@ -431,6 +442,21 @@ def corner_entries(track, threshold: float = 0.015):
     k = np.abs(np.asarray(track.curvature))
     idx = np.where((k[1:] > threshold) & (k[:-1] <= threshold))[0] + 1
     return [float(track.s[i]) for i in idx]
+
+
+def braking_zones(track, straight: float = 250.0, threshold: float = 0.015) -> list:
+    """Corner entries (as corner_entries) with at least `straight` m of nearly straight track
+    (radius > 500 m) before them: where the car arrives at top speed and has to brake hard."""
+    k = np.abs(np.asarray(track.curvature))
+    ds = track.length / len(k)
+    n_back = max(int(straight / ds), 1)
+    out = []
+    for c in corner_entries(track, threshold):
+        i = track.index_at(c)
+        before = k[(i - np.arange(5, n_back)) % len(k)]  # skip the few samples of the turn-in itself
+        if np.all(before < 1 / 500):
+            out.append(c)
+    return out
 
 
 def run_dir(track: str) -> Path:
@@ -531,9 +557,13 @@ def practice_runs(cfg: TrainConfig, rng, gen: int) -> list:
     ep = cfg.episode
     common = dict(laps=99, lap_bonus=False, crash_speed_penalty=cfg.crash_speed_penalty,
                   time_bonus=cfg.time_bonus, realistic=ep.realistic, rubber=ep.rubber, phys_dt=ep.phys_dt,
-                  downforce=ep.downforce)
+                  downforce=ep.downforce, steer_penalty=cfg.steer_penalty)
     if cfg.random:  # new circuits every generation (seeds >= 1000: never a validation circuit)
-        names = [f"random:{int(rng.integers(1000, 2**31))}" for _ in range(cfg.tracks_per_gen)]
+        names = []
+        for _ in range(cfg.tracks_per_gen):
+            seed = int(rng.integers(1000, 2**31))
+            kind = "power" if cfg.power_share and rng.random() < cfg.power_share else "random"
+            names.append(f"{kind}:{seed}")
         line_track, line_laps = names[0], cfg.random_line_laps
     else:
         names = cfg.track_list()
@@ -551,7 +581,13 @@ def practice_runs(cfg: TrainConfig, rng, gen: int) -> list:
         tr = _track(name)
         dist = min(cfg.start_distance, tr.length)
         corners = corner_entries(tr)
-        if corners and rng.random() < cfg.corner_focus:  # practise braking for a corner
+        u = rng.random() if corners else 1.0
+        zones = braking_zones(tr) if cfg.fast_corner_share and u < cfg.fast_corner_share else []
+        if zones:  # flat out down a straight into a corner: the big stop (Monza's first chicane)
+            c = zones[int(rng.integers(len(zones)))]
+            start_s = float((c - rng.uniform(*cfg.fast_corner_approach)) % tr.length)
+            speed = float(rng.uniform(*cfg.fast_corner_speed))
+        elif corners and u < cfg.fast_corner_share + cfg.corner_focus:  # practise braking for a corner
             c = corners[int(rng.integers(len(corners)))]
             start_s = float((c - rng.uniform(*cfg.corner_approach)) % tr.length)
             speed = float(rng.uniform(*cfg.corner_speed))
@@ -608,10 +644,11 @@ def train(cfg: TrainConfig, workers: int = 2, generations: int | None = None, ho
                 # Plus the real test: `laps` laps from the line on every track, with the current network.
                 # Random mode: now and then a lap of a circuit it never trains on (reported only).
                 unseen = []
+                test_laps = cfg.test_laps or cfg.laps
                 if cfg.random and cfg.test_track and gen % cfg.test_every == 0:
-                    unseen = [dataclasses.replace(cfg.episode, track=cfg.test_track, laps=1, start_s=0.0,
+                    unseen = [dataclasses.replace(cfg.episode, track=cfg.test_track, laps=test_laps, start_s=0.0,
                                                   max_distance=0.0, lap_bonus=True,
-                                                  max_time=default_max_time(cfg.test_track))]
+                                                  max_time=default_max_time(cfg.test_track, test_laps))]
                 jobs = ([(th, runs, cfg.hidden) for th in thetas] + [(policy.theta, t, cfg.hidden) for t in tests]
                         + [(policy.theta, t, cfg.hidden) for t in unseen])
                 results = list(ex.map(_eval_one, jobs))
@@ -648,8 +685,12 @@ def train(cfg: TrainConfig, workers: int = 2, generations: int | None = None, ho
                         txt += f" then {r[1]['reason']} at {r[1]['progress']:.0f} m"
                     parts.append(f"{t.track}: {txt}")
                 if un:
-                    parts.append(f"unseen {cfg.test_track}: " + (f"lap {un['laps'][0]:.2f}" if un["laps"]
-                                                                  else f"{un['progress']:.0f} m then {un['reason']}"))
+                    lt = " ".join(f"{x:.2f}" for x in un["laps"][:test_laps])
+                    if len(un["laps"]) >= test_laps:
+                        parts.append(f"unseen {cfg.test_track}: {lt}")
+                    else:
+                        parts.append(f"unseen {cfg.test_track}: {(lt + ' then ') if lt else ''}"
+                                     f"{un['reason']} at {un['progress']:.0f} m")
                 log(f"gen {gen:4d}  practice mean {fit.mean():6.0f} best {fit.max():6.0f}  |  test laps: "
                     f"{'; '.join(parts)}  |  best ever {best['fitness']:.0f}  {mins:5.1f} min")
     except KeyboardInterrupt:
@@ -742,6 +783,17 @@ def main(argv=None):
     t.add_argument("--max-time", type=float, default=None, help="s per test run (default: ~70 s per lap of the short circuit)")
     t.add_argument("--legacy-car", action="store_true",
                    help="train on the old simplified car (no fuel, ideal tyres, no kerbs/grass)")
+    t.add_argument("--name", help="run name: checkpoints in ai_runs/<name>/ (default: from the track)")
+    t.add_argument("--power-share", type=float, default=0.0,
+                   help="with --track random: share of new circuits that are Monza-like power:<seed> ones; "
+                        "also adds power:0 and power:1 to the held-out circuits")
+    t.add_argument("--fast-corner-share", type=float, default=0.0,
+                   help="share of random starts flat out into a corner at the end of a long straight")
+    t.add_argument("--steer-penalty", type=float, default=0.0,
+                   help="practice fitness lost per rad of steering travel (discourages sawing)")
+    t.add_argument("--tracks-per-gen", type=int, default=2, help="with --track random: new circuits per generation")
+    t.add_argument("--test-laps", type=int, default=0, help="laps of the unseen test circuit (default: --laps)")
+    t.add_argument("--test-every", type=int, default=5, help="generations between unseen-circuit tests")
     for name in ("status", "drive"):
         p = sub.add_parser(name)
         p.add_argument("--track", default="short", help="track, or run name for status (e.g. multi_short-test, random)")
@@ -754,13 +806,17 @@ def main(argv=None):
         tracks = tuple(x.strip() for x in a.tracks.split(",")) if a.tracks else ()
         for n in tracks:
             if n not in TRACKS or n == "random":
-                ap.error(f"unknown track {n!r} (short, test, hill, monza or random:<seed>)")
+                ap.error(f"unknown track {n!r} (short, test, hill, monza, random:<seed> or power:<seed>)")
         named = tracks or (a.track,)
         longest = 0.0 if a.track == "random" else max(default_max_time(n, a.laps) for n in named)
         ep = EpisodeConfig(track=a.track, laps=a.laps, max_time=a.max_time or longest,
                            realistic=not a.legacy_car)
+        validation = TrainConfig.validation + (("power:0", "power:1") if a.power_share > 0 else ())
         cfg = TrainConfig(track=tracks[0] if tracks else a.track, tracks=tracks, population=a.population,
-                          laps=a.laps, starts=a.starts, test_track=a.test_track, episode=ep)
+                          laps=a.laps, starts=a.starts, test_track=a.test_track, episode=ep, name=a.name,
+                          power_share=a.power_share, fast_corner_share=a.fast_corner_share,
+                          steer_penalty=a.steer_penalty, tracks_per_gen=a.tracks_per_gen,
+                          test_laps=a.test_laps, test_every=a.test_every, validation=validation)
         what = "new random circuits every generation" if cfg.random else ", ".join(cfg.track_list())
         print(f"training a driver for {what} ({a.laps} laps) with {a.workers} workers; "
               f"checkpoints in {run_dir(cfg.run_name())}/")

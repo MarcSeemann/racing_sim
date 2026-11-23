@@ -16,3 +16,7 @@ venv/
 
 # trained AI drivers (checkpoints)
 ai_runs/
+
+# cluster gateway: local connection settings and downloaded runs
+cluster/cluster.env
+cluster_runs/

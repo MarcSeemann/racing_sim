@@ -5,6 +5,7 @@
     get_track("hill")        the test circuit with 23 m of elevation
     get_track("monza")       Autodromo Nazionale Monza, 5.79 km, real centreline and widths
     get_track("random:42")   a random circuit (carsim.trackgen), the same one for the same seed
+    get_track("power:42")    a random Monza-like circuit: narrow, long straights, tight chicanes
 
 Real circuits come from surveyed data in carsim/data/tracks (see the README there for
 sources and licence).
@@ -16,7 +17,7 @@ from scipy.interpolate import CubicSpline
 
 from .track import Track, hill_circuit, short_circuit
 from .track import test_circuit as long_circuit
-from .trackgen import random_track
+from .trackgen import power_track, random_track
 
 DATA = Path(__file__).parent / "data" / "tracks"
 
@@ -51,7 +52,9 @@ REAL = {"monza"}  # circuits built from survey data
 
 
 def get_track(name: str) -> Track:
-    """A circuit by name: one of NAMED, or "random:<seed>" (also "random" = seed 0)."""
+    """A circuit by name: one of NAMED, "random:<seed>" (also "random" = seed 0) or "power:<seed>"."""
+    if name.startswith("power:"):
+        return power_track(int(name.partition(":")[2]))
     if name.startswith("random"):
         _, _, seed = name.partition(":")
         return random_track(int(seed or 0))
@@ -69,7 +72,10 @@ def track_arg(value: str) -> str:
         _, _, seed = value.partition(":")
         if seed == "" or seed.isdigit():
             return value
-    raise argparse.ArgumentTypeError(f"unknown track {value!r}: choose from {', '.join(NAMED)} or random:<seed>")
+    if value.startswith("power:") and value.partition(":")[2].isdigit():
+        return value
+    raise argparse.ArgumentTypeError(f"unknown track {value!r}: choose from {', '.join(NAMED)}, random:<seed> "
+                                     "or power:<seed>")
 
 
 class _Registry(dict):

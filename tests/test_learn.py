@@ -174,3 +174,30 @@ def test_multi_track_training_tests_every_track(tmp_path, monkeypatch):
     train(cfg, workers=1, generations=1, log=msgs.append)
     assert (tmp_path / "multi_short-test" / "policy.npy").exists()
     assert "short:" in msgs[-1] and "test:" in msgs[-1]
+
+
+# ---- harder practice for Monza ------------------------------------------------------------
+def test_power_circuits_and_fast_corner_starts_in_practice():
+    from carsim.learn import braking_zones, practice_runs
+    cfg = TrainConfig(track="random", starts=9, tracks_per_gen=4, power_share=1.0, fast_corner_share=1.0)
+    runs = practice_runs(cfg, np.random.default_rng(2), 0)
+    assert all(r.track.startswith("power:") for r in runs)
+    fast = [r for r in runs[1:] if r.start_speed >= cfg.fast_corner_speed[0]]
+    assert len(fast) == 8
+    assert braking_zones(learn.TRACKS["monza"]())  # the straight into the first chicane
+
+
+def test_steer_penalty_costs_fitness_per_radian():
+    pol = Policy(N_OBS).init_random(np.random.default_rng(0))
+    kw = dict(track="short", max_time=3.0)
+    f0, info = run_episode(pol.theta, EpisodeConfig(**kw))
+    f1, _ = run_episode(pol.theta, EpisodeConfig(**kw, steer_penalty=5.0))
+    assert info["steer_travel"] > 0 and f1 == pytest.approx(f0 - 5.0 * info["steer_travel"])
+
+
+def test_named_run_goes_to_its_own_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(learn, "RUNS_DIR", tmp_path)
+    cfg = TrainConfig(track="short", name="exp1", population=2, starts=1, laps=1,
+                      episode=EpisodeConfig(track="short", max_time=1.0, laps=1))
+    train(cfg, workers=1, generations=1, log=lambda *a: None)
+    assert (tmp_path / "exp1" / "policy.npy").exists() and not (tmp_path / "short").exists()

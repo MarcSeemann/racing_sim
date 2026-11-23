@@ -21,6 +21,7 @@ Everything comes from one seed, so `random_track(42)` is the same circuit every 
     from carsim.trackgen import random_track
     tr = random_track(7)                       # 2.5-6 km, 11-16 m wide
     tr = random_track(7, elevation=15.0)       # with up to ~15 m of climbs and drops
+    tr = power_track(7)                        # Monza-like: narrow, long straights, tight chicanes
 """
 import dataclasses
 import math
@@ -43,6 +44,9 @@ class TrackGenConfig:
     deep_dent: float = 0.2  # chance that a corner point is pulled in much deeper (hairpins, infields)
     chicane: float = 0.35  # chance that a straight over 350 m gets a chicane
     chicane_radius: tuple = (15.0, 45.0)  # m
+    chicane_angle: tuple = (25.0, 55.0)  # deg, how far the first part of a chicane turns
+    chicane_min_straight: float = 350.0  # m, only straights longer than this can get a chicane
+    min_half_width: float = 4.0  # m, the narrowest each side of the centreline may get
     runoff: float = 10.0  # m of space required between two separate parts of the track
     elevation: float = 0.0  # m, peak-to-peak height range (0 = flat)
     kerb_width: float = 1.5
@@ -97,7 +101,7 @@ def _segments(rng, cfg: TrackGenConfig):
         if radii[k] > 0:
             segs.append(("arc", float(radii[k]), float(math.degrees(turns[k]))))
         straight = lens[k] - tans[k] - tans[(k + 1) % n]
-        if straight > 350.0 and rng.random() < cfg.chicane:
+        if straight > cfg.chicane_min_straight and rng.random() < cfg.chicane:
             segs += _chicane(rng, cfg, straight)
         elif straight > 0.5:
             segs.append(("straight", float(straight)))
@@ -110,7 +114,7 @@ def _chicane(rng, cfg: TrackGenConfig, straight: float):
       "bump":  left-right-left (or mirrored), like Monza's first chicane,
       "s-s":   an S-bend out and an S-bend back, with a short straight in between."""
     r = rng.uniform(*cfg.chicane_radius)
-    a = rng.uniform(25.0, 55.0)
+    a = rng.uniform(*cfg.chicane_angle)
     sign = 1.0 if rng.random() < 0.5 else -1.0
     along = 4 * r * math.sin(math.radians(a))  # distance covered along the straight's direction
     if rng.random() < 0.5:
@@ -174,8 +178,8 @@ def random_track(seed: int, cfg: TrackGenConfig | None = None, name: str | None 
             continue
         n = len(tr.s)
         w = rng.uniform(*cfg.width)
-        wl = np.maximum(w / 2 + _smooth_periodic(rng, n, cfg.width_variation), 4.0)
-        wr = np.maximum(w / 2 + _smooth_periodic(rng, n, cfg.width_variation), 4.0)
+        wl = np.maximum(w / 2 + _smooth_periodic(rng, n, cfg.width_variation), cfg.min_half_width)
+        wr = np.maximum(w / 2 + _smooth_periodic(rng, n, cfg.width_variation), cfg.min_half_width)
         tr = dataclasses.replace(tr, width_left=wl, width_right=wr, kerb_width=cfg.kerb_width,
                                  grade=None, vert_curv=None)
         if not _clear_of_itself(tr, cfg.runoff):
@@ -186,6 +190,19 @@ def random_track(seed: int, cfg: TrackGenConfig | None = None, name: str | None 
             tr = tr.with_elevation(lambda s, z=z, L=tr.length: float(np.interp(s, tr.s, z, period=L)))
         return tr
     raise RuntimeError(f"no valid circuit for seed {seed} after {max_tries} tries")
+
+
+# "Power circuits", like Monza: few corners on a long lap (so long straights), narrow (~8-11 m,
+# Monza averages 9.4 m), and tight chicanes at the end of the straights (Monza's first chicane is
+# R ~9 m after 940 m flat out). The ordinary random circuits never go below R 15 m or 10.6 m wide.
+POWER = TrackGenConfig(length=(4500.0, 7000.0), corners=(5, 9), width=(8.0, 11.0), r_min=15.0,
+                       chicane=0.7, chicane_radius=(9.0, 20.0), chicane_angle=(35.0, 70.0),
+                       chicane_min_straight=300.0, min_half_width=3.6)
+
+
+def power_track(seed: int, elevation: float | None = None) -> Track:
+    """A random Monza-like circuit (see POWER), the same one for the same seed."""
+    return random_track(seed, POWER, name=f"Power {seed}", elevation=elevation)
 
 
 def track_stats(tr: Track) -> dict:
