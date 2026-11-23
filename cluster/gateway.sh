@@ -60,6 +60,7 @@ ARGS=("${ARGV[@]:1}")
 RE_RUN='^[a-z0-9][a-z0-9_-]{0,47}$'
 RE_SHA='^[0-9a-f]{7,40}$'
 RE_INT='^[0-9]{1,6}$'
+RE_JOB='^[0-9]{1,12}$'
 RE_NUM='^[0-9]{1,4}(\.[0-9]{1,4})?$'
 RE_TRACK='^(short|test|hill|monza|random|random:[0-9]{1,10}|power:[0-9]{1,10})$'
 RE_TRACKS='^[a-z0-9:]{1,24}(,[a-z0-9:]{1,24}){0,7}$'
@@ -166,13 +167,13 @@ submit)
   sbatch --parsable "$script" ;;
 
 cancel)
-  j="${ARGS[0]:-}"; need jobid "$j" "$RE_INT"
+  j="${ARGS[0]:-}"; need jobid "$j" "$RE_JOB"
   name="$(squeue -u "$USER" -h -j "$j" -o '%j' 2>/dev/null || true)"
   [[ "$name" == claude-* ]] || die "job $j is not a running/queued claude-* job of $USER"
   scancel "$j" && echo "cancelled $j ($name)" ;;
 
 log)
-  j="${ARGS[0]:-}"; need jobid "$j" "$RE_INT"; n="$(lines_arg "${ARGS[1]:-}")"
+  j="${ARGS[0]:-}"; need jobid "$j" "$RE_JOB"; n="$(lines_arg "${ARGS[1]:-}")"
   [[ -f "$BASE/logs/$j.out" ]] || die "no log for job $j"
   tail -n "$n" "$BASE/logs/$j.out" ;;
 
