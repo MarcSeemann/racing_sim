@@ -308,3 +308,21 @@ def test_command_penalty_costs_fitness_per_unit_of_command_change():
     f0, info = run_episode(pol.theta, EpisodeConfig(**kw))
     f1, _ = run_episode(pol.theta, EpisodeConfig(**kw, command_penalty=3.0))
     assert info["command_travel"] > 0 and f1 == pytest.approx(f0 - 3.0 * info["command_travel"])
+
+
+def test_physics_guide_asks_for_braking_before_monzas_first_chicane():
+    from carsim.learn import GUIDE_OBS, guidance, guide_obs, make_car
+    tr = learn._track("monza")
+    car = make_car(tr, EpisodeConfig(track="monza"), 0)
+    g = guidance(tr, car.p)
+    assert g["v"][tr.index_at(500)] * 3.6 > 280 and g["v"][tr.index_at(900)] * 3.6 < 180  # straight vs chicane
+    s = car.state
+    obs = {}
+    for at in (300.0, 750.0):
+        j = tr.index_at(at)
+        s.x, s.y, s.psi = float(tr.x[j]), float(tr.y[j]), float(tr.heading[j])
+        car.set_speed(85.0)
+        obs[at] = dict(zip(GUIDE_OBS, guide_obs(car, tr, j)))
+    assert obs[300.0]["brake_need"] == 0.0  # flat out: nothing to brake for yet
+    assert obs[750.0]["brake_need"] > 0.2 and obs[750.0]["target_speed_150"] < -1  # the chicane is coming
+    assert len(learn.observe(car, tr, tr.index_at(750.0))) == learn.N_OBS

@@ -102,7 +102,11 @@ OBS_V5 = OBS_V4 + LIMITS_OBS
 # Version 6 (the controls of a real driver): is DRS / straight mode allowed here, is it open, and
 # where the brake-bias dial is (the battery level is ers_soc above).
 CONTROL_OBS = ["aero_zone", "aero_open", "brake_bias"]
-OBS_NAMES = OBS_V5 + CONTROL_OBS
+# Physics guidance (what the car could do here): the car-only lap model's speed along the racing line
+# ahead, the braking that speed asks for, the steering the line's curve needs, and how far the car is
+# off the line. carsim.lapsim on the coarse training line (cached per circuit and car).
+GUIDE_OBS = ["target_speed_10", "target_speed_50", "target_speed_150", "brake_need", "steer_ff", "line_offset"]
+OBS_NAMES = OBS_V5 + CONTROL_OBS + GUIDE_OBS
 # The layout of the varying-width branch's runs (its "version 2": the edge distances after the basics).
 OBS_V2W = OBS_V1[:10] + ["width_left", "width_right"] + OBS_V1[10:]
 
@@ -252,7 +256,57 @@ def observe(car, track, i: int) -> np.ndarray:
             min(track.room_to_barrier(i, +1), 40.0) / 20.0, min(track.room_to_barrier(i, -1), 40.0) / 20.0]
     obs += [1.0 if aero_zones(track)[i] else 0.0, 1.0 if getattr(car, "aero_open", False) else 0.0,
             getattr(car, "bias_dial", 0.0)]
+    obs += guide_obs(car, track, i)
     return np.array(obs)
+
+
+GUIDE_BRAKE_AHEAD = np.arange(5.0, 301.0, 5.0)  # m: where brake_need looks for a slower target
+
+
+def guidance(track, p) -> dict | None:
+    """The physics guide for this circuit and car: the car-only lap model's speed (m/s) at every
+    centreline sample, the racing line's curvature there, and the line's offset from the centreline
+    (+ = left). On the coarse racing line the training car already uses for the rubber (~0.5 s per
+    circuit on top of it); None if the lap model fails on this circuit."""
+    from . import lapsim
+    key = (round(p.aero.ClA, 4), round(p.aero.CdA, 4), round(p.chassis.mass, 2), round(p.tyres.lateral.mu0, 4)
+           if hasattr(p.tyres, "lateral") else 0.0)
+    cache = track.__dict__.setdefault("_guide", {})
+    if key not in cache:
+        try:
+            path = cached_racing_line(track, step=RUBBER_LINE_STEP)[0]
+            r = lapsim.lap(path, p, fuel_kg=0.0, line="centre", aero_open=False)
+            v = np.asarray(r["v"], float)
+            if len(v) != len(track.s):
+                v = np.interp(np.linspace(0, 1, len(track.s)), np.linspace(0, 1, len(v)), v)
+            h = np.asarray(track.heading)
+            n = -(np.asarray(path.x) - track.x) * np.sin(h) + (np.asarray(path.y) - track.y) * np.cos(h)
+            cache[key] = {"v": v, "kappa": np.asarray(path.curvature, float), "n": n}
+        except Exception:  # a circuit the lap model cannot do: no guidance (inputs 0)
+            cache[key] = None
+    return cache[key]
+
+
+def guide_obs(car, track, i: int) -> list:
+    """GUIDE_OBS for the car at centreline index i (all 0 when there is no guide)."""
+    g = guidance(track, car.p)
+    if g is None:
+        return [0.0] * len(GUIDE_OBS)
+    s = car.state
+    v, s_i = s.speed, track.s[i]
+    vt = g["v"]
+    ahead = [float(vt[track.index_at(s_i + d)]) for d in (10.0, 50.0, 150.0)]
+    sl = track.__dict__.get("_sl_array")
+    if sl is None:
+        sl = track.__dict__["_sl_array"] = np.asarray(track._sl)
+    idx = np.searchsorted(sl, (s_i + GUIDE_BRAKE_AHEAD) % track.length, side="right") - 1
+    need = float(np.max((v * v - vt[idx] ** 2) / (2.0 * GUIDE_BRAKE_AHEAD)))  # m/s^2 to make every target
+    k = float(g["kappa"][track.index_at(s_i + max(0.15 * v, 5.0))])
+    ff = math.atan(car.p.chassis.wheelbase * k) / car.p.chassis.max_steer
+    off = track.cross_track_error(i, s.x, s.y) - float(g["n"][i])
+    clip = lambda x, a: max(min(x, a), -a)
+    return [clip((a - v) / 20.0, 3.0) for a in ahead] + [clip(max(need, 0.0) / 50.0, 3.0), clip(ff, 1.5),
+                                                         clip(off / 3.0, 3.0)]
 
 
 N_OBS = len(OBS_NAMES)
