@@ -1,4 +1,4 @@
-"""The 2026 Formula 1 calendar as a HELD-OUT test set: 24 real circuits the driver never trains on.
+"""The 2026 Formula 1 calendar as a HELD-OUT test set: 25 real circuits the driver never trains on.
 
     get_track("f1:suzuka")                      one circuit (see CALENDAR for the keys)
     python -m carsim.f1_calendar list           the circuits: round, length, width, data source
@@ -72,6 +72,9 @@ CALENDAR = (
     Circuit(22, "las_vegas", "Las Vegas Strip Circuit", "Las Vegas GP", 6201, "geo", None, "us-2023"),
     Circuit(23, "lusail", "Lusail International Circuit", "Qatar GP", 5419, "geo", None, "qa-2004"),
     Circuit(24, "yas_marina", "Yas Marina Circuit", "Abu Dhabi GP", 5281, "hybrid", "YasMarina", "ae-2009"),
+    # Added during the season after Bahrain and Saudi Arabia were cancelled (round 16 of the revised
+    # calendar, between Baku and Singapore); numbered 25 here so the original rounds keep their numbers.
+    Circuit(25, "sepang", "Sepang International Circuit", "Malaysian GP", 5543, "tum", "Sepang", "my-1999"),
 )
 BY_KEY = {c.key: c for c in CALENDAR}
 PREFIX = "f1:"
