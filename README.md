@@ -171,6 +171,14 @@ A driver trained before this starts with zero weight on the new inputs, so it dr
 (up to floating-point rounding); train a new run from it with `--init-from`. Resuming an older run
 with the new inputs archives it and starts afresh, like any change of inputs.
 
+**The 2026 car and the driver's controls.** `--car 2026` trains on a car built to the 2026 rules
+(768 kg, 3.40 m wheelbase, 1.90 m wide, narrower tyres, ~400 kW engine + 350 kW MGU-K that fades out
+from 290 to 355 km/h, no MGU-H, active aero; sources and estimates in
+[docs/car_2026.md](docs/car_2026.md)). The driver now also controls DRS / straight mode (only opens in
+the aero zones found on the long straights, closes on the brakes; Monaco has none), the brake-bias dial
+(±4 %) and the ERS mode (save energy … deploy). A driver trained with only steering and pedal carries
+over: its new controls start at zero, which is neutral.
+
 **Free practice before the race.** Like FP1–FP3 at a Grand Prix, a copy of the driver can practise
 on a circuit for a few generations before the 3-lap test. Nothing is saved, so this works on the
 held-out F1 calendar too: it measures how quickly the driver learns a new circuit.

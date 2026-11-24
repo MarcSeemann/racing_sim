@@ -9,7 +9,7 @@ from carsim.learn import N_OBS, EpisodeConfig, LearnedDriver, Policy, TrainConfi
 def test_policy_outputs_are_bounded():
     pol = Policy(N_OBS).init_random(np.random.default_rng(0))
     out = pol.act(np.random.default_rng(1).standard_normal(N_OBS) * 5)
-    assert out.shape == (2,) and np.all(np.abs(out) <= 1.0)
+    assert out.shape == (learn.N_ACT,) and np.all(np.abs(out) <= 1.0)
     assert pol.size == len(pol.theta)
 
 

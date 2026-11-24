@@ -67,6 +67,7 @@ from .dynamics import Car2D
 from .f1_calendar import is_calendar
 from .params import CarParams, race_car
 from .racing_line import cached_racing_line
+from .aero_zones import zones as aero_zones
 from .track_memory import LOOKAHEAD_NAMES, MEMORY_NAMES, lookahead, memory
 from .vehicle import Inputs
 
@@ -92,16 +93,39 @@ OBS_V3 = (OBS_V1 + ["throttle", "brake", "kappa_front", "grip_front", "grip_rear
 # Version 4: it looks ~5 s ahead in windows that coarsen with distance, and knows the next corners of
 # the circuit before it can see them (carsim.track_memory). Drivers trained on OBS_V3 carry over:
 # the new inputs start with zero weight.
-OBS_NAMES = OBS_V3 + LOOKAHEAD_NAMES + MEMORY_NAMES
+OBS_V4 = OBS_V3 + LOOKAHEAD_NAMES + MEMORY_NAMES
+# Version 6 (the controls of a real driver): is DRS / straight mode allowed here, is it open, and
+# where the brake-bias dial is (the battery level is ers_soc above).
+CONTROL_OBS = ["aero_zone", "aero_open", "brake_bias"]
+OBS_NAMES = OBS_V4 + CONTROL_OBS
 # The layout of the varying-width branch's runs (its "version 2": the edge distances after the basics).
 OBS_V2W = OBS_V1[:10] + ["width_left", "width_right"] + OBS_V1[10:]
 
 
 # ---- the policy network --------------------------------------------------------------
-class Policy:
-    """MLP: observation -> (steer, pedal), tanh outputs in -1..1."""
+# What the driver controls. 0 is neutral for the last three, so a driver trained with only steering
+# and the pedal (2 outputs) drives exactly as before when its new outputs start at zero:
+#   aero        > 0: ask for DRS (2025 car) / straight mode (2026 car); the car only opens it in an
+#               aero zone and closes it on the brakes
+#   brake_bias  -1..1: brake balance -/+ BIAS_RANGE around the car's setting
+#   ers_mode    -1..0: deploy less (save energy; -1 = no deployment); >= 0: normal deployment
+ACTION_NAMES = ["steer", "pedal", "aero", "brake_bias", "ers_mode"]
+N_ACT = len(ACTION_NAMES)
+BIAS_RANGE = 0.04
 
-    def __init__(self, n_obs: int, hidden=(32, 32), n_act: int = 2, theta=None):
+
+def _infer_n_act(size: int, n_obs: int, hidden) -> int:
+    """Number of outputs of a network of this size (n_obs inputs, these hidden layers)."""
+    sizes = (n_obs, *hidden)
+    body = sum(a * b + b for a, b in zip(sizes[:-1], sizes[1:]))
+    a, rem = divmod(size - body, hidden[-1] + 1)
+    return a if rem == 0 and a > 0 else -1
+
+
+class Policy:
+    """MLP: observation -> controls (ACTION_NAMES), tanh outputs in -1..1."""
+
+    def __init__(self, n_obs: int, hidden=(32, 32), n_act: int = N_ACT, theta=None):
         self.shapes = []
         sizes = (n_obs, *hidden, n_act)
         for a, b in zip(sizes[:-1], sizes[1:]):
@@ -130,13 +154,26 @@ class Policy:
 
 
 def migrate_theta(theta, old_names, new_names=None, hidden=(32, 32)):
-    """Map network weights trained on observation layout old_names onto new_names.
+    """Map network weights trained on observation layout old_names onto new_names (and from fewer
+    controls onto ACTION_NAMES).
 
     The first layer gets one row per input: rows of inputs that exist in both layouts are
     copied, new inputs get zero rows (so they do not change what the driver does until training
-    finds a use for them). Deeper layers are unchanged."""
+    finds a use for them). New controls get zero weights in the last layer: output 0, neutral.
+    The layers in between are unchanged."""
     new_names = list(OBS_NAMES if new_names is None else new_names)
     old_names = list(old_names)
+    theta = np.asarray(theta, float)
+    old_act = _infer_n_act(theta.size, len(old_names), hidden)
+    if old_act < 1 or old_act > N_ACT:
+        raise ValueError(f"network of size {theta.size} does not fit {len(old_names)} inputs")
+    if old_act < N_ACT:  # pad the output layer with neutral controls
+        h = hidden[-1]
+        last = h * old_act + old_act
+        W, b = theta[-last:-old_act].reshape(h, old_act), theta[-old_act:]
+        W2, b2 = np.zeros((h, N_ACT)), np.zeros(N_ACT)
+        W2[:, :old_act], b2[:old_act] = W, b
+        theta = np.concatenate([theta[:-last], W2.ravel(), b2])
     old = Policy(len(old_names), hidden, theta=theta)
     new = Policy(len(new_names), hidden)
     h0 = hidden[0]
@@ -157,8 +194,8 @@ def adapt_theta(theta, hidden=(32, 32), obs_names=None):
     if theta.size == Policy(N_OBS, hidden).size and (obs_names is None or list(obs_names) == OBS_NAMES):
         return theta, False
     if obs_names is None:  # older runs did not save their layout: tell it from the network's size
-        for layout in (OBS_V1, OBS_V2W, OBS_V3):
-            if theta.size == Policy(len(layout), hidden).size:
+        for layout in (OBS_V1, OBS_V2W, OBS_V3, OBS_V4):
+            if any(theta.size == Policy(len(layout), hidden, n_act=a).size for a in (2, N_ACT)):
                 obs_names = layout
                 break
         else:
@@ -206,6 +243,8 @@ def observe(car, track, i: int) -> np.ndarray:
     obs += [track._wl[i] / 6.0, track._wr[i] / 6.0]  # room to the edges: widths vary round a lap
     obs += lookahead(track, i, s.speed)  # sight: the next ~5 s, coarser further out
     obs += memory(track, i)  # knowledge: the next corners of the circuit, however far
+    obs += [1.0 if aero_zones(track)[i] else 0.0, 1.0 if getattr(car, "aero_open", False) else 0.0,
+            getattr(car, "bias_dial", 0.0)]
     return np.array(obs)
 
 
@@ -234,7 +273,8 @@ class EpisodeConfig:
     tyre_temp: float | None = None  # deg C for all four tyres; None = straight off the blankets
     brake_temp: float | None = None  # deg C; None = the car's default start temperature
     rubber: float = 2e6  # rubber on the racing line (J per bin), as in the 3D view
-    downforce: str = "medium"  # wing trim of the 2025-spec car: "low" (Monza), "medium", "high"
+    downforce: str = "medium"  # wing trim: "low" (Monza), "medium", "high"
+    car: str = "2025"  # "2025" or "2026" (carsim.params.f1_2026: active aero, 350 kW MGU-K)
     phys_dt: float = PHYS_DT
 
 
@@ -248,7 +288,7 @@ def make_car(track, cfg: EpisodeConfig, i: int = 0):
     # (+-3 m band; ~0.4 m from the fine line) and ~20x quicker: random circuits need a new one each time.
     cond.set_racing_line(cached_racing_line(track, step=RUBBER_LINE_STEP)[1])
     cond.i = i  # where the car starts (the surface lookup searches near the last position)
-    car = Car2D(race_car(cfg.fuel_kg, downforce=cfg.downforce), conditions=cond)
+    car = Car2D(race_car(cfg.fuel_kg, spec=getattr(cfg, "car", "2025"), downforce=cfg.downforce), conditions=cond)
     if cfg.tyre_temp is not None:
         for ts in car.state.tyres:
             ts.t_surface, ts.t_core = cfg.tyre_temp, cfg.tyre_temp - 5.0
@@ -276,6 +316,21 @@ def _start_gear(car, v):
     return best
 
 
+def controls(act, car, track, i: int) -> Inputs:
+    """The network's outputs (ACTION_NAMES) as the car's inputs. DRS / straight mode only opens in an
+    aero zone and closes when the driver brakes; the bias dial moves the brake balance."""
+    s = car.state
+    pedal = float(act[1])
+    brake = max(-pedal, 0.0)
+    want = len(act) > 2 and act[2] > 0.0
+    open_ = bool(want and brake < 0.02 and aero_zones(track)[i])
+    car.aero_open = open_
+    car.bias_dial = float(act[3]) if len(act) > 3 else 0.0
+    return Inputs(throttle=max(pedal, 0.0), brake=brake, steer=float(act[0]) * car.p.chassis.max_steer,
+                  gear=auto_gear(s, car), drs=open_, brake_bias_delta=BIAS_RANGE * car.bias_dial,
+                  ers_mode=min(float(act[4]), 0.0) if len(act) > 4 else 0.0)
+
+
 def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32, 32)):
     """Drive one episode with network weights theta. Returns (fitness, info[, telemetry])."""
     track = track or _track(cfg.track)
@@ -298,7 +353,7 @@ def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32,
         act = policy.act(observe(car, track, i))
         steer = float(act[0]) * car.p.chassis.max_steer
         pedal = float(act[1])
-        inp = Inputs(throttle=max(pedal, 0.0), brake=max(-pedal, 0.0), steer=steer, gear=auto_gear(s, car))
+        inp = controls(act, car, track, i)
         before = s.steer
         for _ in range(n_sub):
             car.step(inp, cfg.phys_dt, row=False)
@@ -565,7 +620,7 @@ def practice_runs(cfg: TrainConfig, rng, gen: int) -> list:
     ep = cfg.episode
     common = dict(laps=99, lap_bonus=False, crash_speed_penalty=cfg.crash_speed_penalty,
                   time_bonus=cfg.time_bonus, realistic=ep.realistic, rubber=ep.rubber, phys_dt=ep.phys_dt,
-                  downforce=ep.downforce, steer_penalty=cfg.steer_penalty)
+                  downforce=ep.downforce, car=ep.car, steer_penalty=cfg.steer_penalty)
     if cfg.random:  # new circuits every generation (seeds >= 1000: never a validation circuit)
         names = []
         for _ in range(cfg.tracks_per_gen):
@@ -806,12 +861,11 @@ class LearnedDriver:
             self._next_t = s.t + CONTROL_DT
             self.i = self.track.nearest(s.x, s.y, self.i)
             act = self.policy.act(observe(car, self.track, self.i))
-            pedal = float(act[1])
-            self._inp = Inputs(throttle=max(pedal, 0.0), brake=max(-pedal, 0.0),
-                               steer=float(act[0]) * car.p.chassis.max_steer, gear=auto_gear(s, car))
+            self._inp = controls(act, car, self.track, self.i)
         else:
             self._inp = Inputs(throttle=self._inp.throttle, brake=self._inp.brake, steer=self._inp.steer,
-                               gear=auto_gear(s, car))
+                               gear=auto_gear(s, car), drs=self._inp.drs,
+                               brake_bias_delta=self._inp.brake_bias_delta, ers_mode=self._inp.ers_mode)
         return self._inp
 
 
@@ -836,6 +890,8 @@ def main(argv=None):
     t.add_argument("--laps", type=int, default=3, help="laps of the run from the line and of the test (default 3)")
     t.add_argument("--starts", type=int, default=4, help="practice runs per generation (1 from the line + random)")
     t.add_argument("--max-time", type=float, default=None, help="s per test run (default: ~70 s per lap of the short circuit)")
+    t.add_argument("--car", choices=["2025", "2026"], default="2025",
+                   help="2026: the 2026-spec car (active aero, 350 kW MGU-K, 768 kg)")
     t.add_argument("--legacy-car", action="store_true",
                    help="train on the old simplified car (no fuel, ideal tyres, no kerbs/grass)")
     t.add_argument("--name", help="run name: checkpoints in ai_runs/<name>/ (default: from the track)")
@@ -862,6 +918,7 @@ def main(argv=None):
         p.add_argument("--policy", "--run", dest="run",
                        help="drive: use the driver of this training run, e.g. random (default: the track's own)")
         p.add_argument("--laps", type=int, default=3)
+        p.add_argument("--car", choices=["2025", "2026"], default="2025")
     a = ap.parse_args(argv)
 
     if a.cmd == "train":
@@ -875,7 +932,7 @@ def main(argv=None):
         named = tracks or (a.track,)
         longest = 0.0 if a.track == "random" else max(default_max_time(n, a.laps) for n in named)
         ep = EpisodeConfig(track=a.track, laps=a.laps, max_time=a.max_time or longest,
-                           realistic=not a.legacy_car)
+                           realistic=not a.legacy_car, car=a.car)
         validation = TrainConfig.validation + (("power:0", "power:1") if a.power_share > 0 else ())
         cfg = TrainConfig(track=tracks[0] if tracks else a.track, tracks=tracks, population=a.population,
                           laps=a.laps, starts=a.starts, test_track=a.test_track, episode=ep, name=a.name,
@@ -915,7 +972,8 @@ def main(argv=None):
     elif a.cmd == "drive":
         if a.track not in TRACKS or a.track == "random":
             ap.error(f"unknown track {a.track!r}")
-        cfg = EpisodeConfig(track=a.track, laps=a.laps, max_time=default_max_time(a.track, a.laps) + 100.0)
+        cfg = EpisodeConfig(track=a.track, laps=a.laps, max_time=default_max_time(a.track, a.laps) + 100.0,
+                            car=a.car)
         fit, info = run_episode(load_policy(a.run or a.track), cfg, hidden=_run_hidden(run_dir(a.run or a.track)))
         laps = " ".join(f"{x:.2f}" for x in info["laps"]) or "none"
         tail = "" if len(info["laps"]) >= a.laps else f" ({info['reason']} after {info['progress']:.0f} m)"

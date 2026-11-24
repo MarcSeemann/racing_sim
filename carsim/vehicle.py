@@ -26,7 +26,9 @@ class Inputs:
     brake: float = 0.0  # 0..1
     gear: int | None = None  # requested gear; None keeps the current one
     steer: float = 0.0  # road-wheel angle, rad, positive = left (used by Car2D)
-    drs: bool = False  # rear-wing flap open
+    drs: bool = False  # rear-wing flap open (2026 car: straight mode)
+    brake_bias_delta: float = 0.0  # added to the car's front brake share (driver's bias dial)
+    ers_mode: float = 0.0  # -1..0 deploys less (saves energy), >= 0 normal deployment
 
 
 @dataclass

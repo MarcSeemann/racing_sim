@@ -43,7 +43,10 @@ def aero_forces(aero, rho: float, v_air: float, v: float, h_front: float, drs: b
         front += aero.rake_balance_per_m * max(min(h_rear - aero.rear_height_ref, 0.06), -0.06)
 
     cda = aero.CdA + aero.induced_drag * (cla - aero.ClA)
-    if drs:
+    if drs and getattr(aero, "active_aero", False):  # 2026 straight mode: both wings flatten
+        cla *= aero.straight_cla_factor
+        cda *= aero.straight_cda_factor
+    elif drs:
         front_cla = cla * front
         rear_cla = cla * (1 - front) * (1 - aero.drs_rear_loss)
         cla = front_cla + rear_cla

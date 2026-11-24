@@ -471,9 +471,13 @@ class Car2D:
         t_ers = 0.0
         if e.enabled and t_eng > 0 and omega > 0:
             t_full = full_throttle_torque(p.engine, rpm)
-            t_ers_max = min(throttle * e.power / omega, 0.5 * throttle * t_full)
+            t_ers_max = min(throttle * e.power / omega, e.max_torque_share * throttle * t_full)
             soc = self.ers_energy / e.store
             strategy = min(max((soc - e.soc_floor) / (e.soc_taper - e.soc_floor), 0.0), 1.0)
+            if e.deploy_taper_kmh is not None:  # 2026: less deployment at high speed
+                v0, v1 = e.deploy_taper_kmh
+                strategy *= min(max((v1 - s.vx * 3.6) / (v1 - v0), 0.0), 1.0)
+            strategy *= min(max(1.0 + float(getattr(inp, "ers_mode", 0.0)), 0.0), 1.0)  # driver: save
             t_ers = t_ers_max * strategy
             lost = t_ers_max - t_ers  # the curve includes full deployment: take out what is not deployed
             t_eng -= lost
@@ -520,8 +524,9 @@ class Car2D:
         drive = [0.0, 0.0, t_axle / 2 - lock, t_axle / 2 + lock]
 
         brake = s.brake
-        bf = brake * c.max_brake_force * c.brake_front_bias * rad / 2
-        br = brake * c.max_brake_force * (1 - c.brake_front_bias) * rad / 2
+        bias = min(max(c.brake_front_bias + float(getattr(inp, "brake_bias_delta", 0.0)), 0.3), 0.8)
+        bf = brake * c.max_brake_force * bias * rad / 2
+        br = brake * c.max_brake_force * (1 - bias) * rad / 2
         tbrake = [bf, bf, br, br]
         bk = p.brakes
         if bk.thermal:

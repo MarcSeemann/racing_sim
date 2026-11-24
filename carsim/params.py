@@ -6,6 +6,8 @@ All units SI: kg, m, s, N, W, rad. Engine speeds are given in rpm for readabilit
 """
 from dataclasses import dataclass, field
 
+import numpy as np
+
 from .thermal import ThermalParams
 from .tyres import TyreParams
 
@@ -53,6 +55,12 @@ class Aero:
     induced_drag: float = 0.08  # extra CdA per unit of extra ClA
     drs_rear_loss: float = 0.32  # share of rear downforce lost with DRS open
     drs_drag_reduction: float = 0.10  # CdA removed with DRS open
+    # 2026 active aero: with `active_aero`, the drs flag means "straight mode": BOTH wings flatten,
+    # ClA and CdA scale by these factors (the balance stays). Estimates: ~55 % less drag was the
+    # pre-season prediction; calibrate against 2026 lap times (tools/calibrate.py --car 2026).
+    active_aero: bool = False
+    straight_cla_factor: float = 0.55
+    straight_cda_factor: float = 0.55
     side_force_area: float = 1.5  # Cy * side area, m^2 (crosswind force)
     # Phase 14: rake (rear ride height) and yaw sensitivity, drag pitching moment.
     rear_height_ref: float = 0.040  # m, rear ride height (at speed) at which ClA/balance take their nominal values
@@ -221,6 +229,9 @@ class ERS:
     harvest_efficiency: float = 0.85  # wheel to battery
     min_harvest_speed: float = 8.0  # m/s
     exhaust_harvest: float = 40e3  # W recovered from the exhaust (MGU-H) at full throttle, high revs
+    max_torque_share: float = 0.5  # the MGU-K never gives more than this share of the full torque curve
+    # 2026: deployment tapers with speed: full up to the first value (km/h), nothing at the second.
+    deploy_taper_kmh: tuple | None = None
     # Deployment strategy of the ECU: full power above soc_taper, tapering to nothing at soc_floor
     # ("clipping" at the end of the straights instead of running the battery flat).
     soc_floor: float = 0.08
@@ -275,6 +286,56 @@ def f1_2025(fuel_kg: float = 0.0, downforce: str = "medium", **kw) -> CarParams:
     return p
 
 
-def race_car(fuel_kg: float = 100.0, **kw) -> CarParams:
-    """Race-weekend setup: the 2025-spec car (800 kg with driver, minimum weight) plus fuel."""
-    return f1_2025(fuel_kg, **kw)
+def race_car(fuel_kg: float = 100.0, spec: str = "2025", **kw) -> CarParams:
+    """Race-weekend setup: the 2025-spec car (800 kg with driver, minimum weight) plus fuel, or the
+    2026-spec car (spec="2026")."""
+    return f1_2026(fuel_kg, **kw) if str(spec) == "2026" else f1_2025(fuel_kg, **kw)
+
+
+# The 2026 rules (FIA 2026 Technical Regulations, as reported by F1 and the teams; see
+# docs/car_2026.md for sources). Hard numbers from the rules; the power-unit split and the aero are
+# estimates to calibrate against 2026 lap times.
+F1_2026 = {
+    "min_mass_kg": 768.0,  # car + driver, no fuel (2025: 800)
+    "max_wheelbase_m": 3.40,  # 2025: 3.60
+    "max_width_m": 1.90,  # 2025: 2.00
+    "tyre_diameter_m": (0.720, 0.725),  # 18-inch, as before
+    "tyre_width_m": (0.280, 0.375),  # front 25 mm, rear 30 mm narrower than 2025
+    "max_fuel_kg": 110.0,
+    "ice_kw": 400.0,  # estimate: about half the power is electric
+    "mguk_kw": 350.0,  # 2025: 120 kW (and an MGU-H, now gone)
+    "deploy_taper_kmh": (290.0, 355.0),  # full MGU-K power up to 290 km/h, none at 355
+}
+# Corner-mode trims (ClA, CdA, front balance): estimates, a little less downforce and drag than 2025.
+TRIMS_2026 = {"low": (2.9, 0.78, 0.41), "medium": (3.5, 0.95, 0.42), "high": (4.1, 1.10, 0.43)}
+
+
+def f1_2026(fuel_kg: float = 0.0, downforce: str = "medium", **kw) -> CarParams:
+    """A car built to the 2026 F1 rules: 768 kg with driver, 3.40 m wheelbase, 1.90 m wide on
+    narrower 18-inch tyres; ~400 kW engine + 350 kW MGU-K (tapering from 290 to 355 km/h), no MGU-H;
+    active aero (straight mode in the aero zones). Plus fuel."""
+    from .powertrain import RPM_TO_RADS
+    p = f1_2025(fuel_kg, downforce=downforce, **kw)
+    c, r = p.chassis, F1_2026
+    c.mass = r["min_mass_kg"]
+    c.wheelbase = r["max_wheelbase_m"]
+    c.wheel_radius = sum(r["tyre_diameter_m"]) / 4
+    c.track_front = r["max_width_m"] - r["tyre_width_m"][0]
+    c.track_rear = r["max_width_m"] - r["tyre_width_m"][1]
+    p.fuel.capacity_kg = r["max_fuel_kg"]
+    p.aero.ClA, p.aero.CdA, p.aero.front_balance = TRIMS_2026[downforce]
+    p.aero.active_aero = True
+    # Engine: the 2025 curve's shape scaled to a ~400 kW ICE, plus up to 350 kW of MGU-K.
+    e, rpm = p.engine, np.asarray(p.engine.rpm_points, float)
+    t25 = np.asarray(e.torque_points, float)
+    omega = rpm * RPM_TO_RADS
+    ers25 = np.minimum(120e3 / omega, 0.5 * t25)
+    ice = t25 - ers25
+    ice *= r["ice_kw"] * 1e3 / float(np.max(ice * omega))
+    mguk = np.minimum(r["mguk_kw"] * 1e3 / omega, 1.5 * ice)  # never more than 60 % of the total
+    e.torque_points = tuple(float(x) for x in ice + mguk)
+    p.ers.power = p.ers.harvest_power = r["mguk_kw"] * 1e3
+    p.ers.exhaust_harvest = 0.0  # no MGU-H
+    p.ers.max_torque_share = 0.6
+    p.ers.deploy_taper_kmh = r["deploy_taper_kmh"]
+    return p

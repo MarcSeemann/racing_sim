@@ -108,7 +108,7 @@ def apex_speeds(dist, speed, window_m: float = 120.0, max_kmh: float = 260.0):
     return out
 
 
-def compare(year: int, keys, car_kw: dict, log=print):
+def compare(year: int, keys, car_kw: dict, log=print, car: str = "2025"):
     from carsim.lapsim import lap
     from carsim.params import race_car
     rows = []
@@ -125,7 +125,7 @@ def compare(year: int, keys, car_kw: dict, log=print):
             real_apex = [v for _, v in apex_speeds(d["Distance"], d["Speed"])]
         except Exception:
             top_real, real_apex = nan, []
-        r = lap(get_track(f"f1:{key}"), race_car(10.0, **car_kw))
+        r = lap(get_track(f"f1:{key}"), race_car(10.0, spec=car, **car_kw))
         sim_apex = [v for _, v in apex_speeds(r["s"], r["v"] * 3.6)]
         ra = float(np.mean(real_apex)) if real_apex else nan
         sa = float(np.mean(sim_apex)) if sim_apex else nan
@@ -148,6 +148,7 @@ def main():
     ap.add_argument("--circuits", help="comma-separated calendar keys (default: --all)")
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--car-kw", action="append", default=[], help="race_car keyword, e.g. downforce=low")
+    ap.add_argument("--car", choices=["2025", "2026"], default=None, help="car spec (default: the --year's)")
     a = ap.parse_args()
     keys = [c.key for c in CALENDAR] if a.all or not a.circuits else a.circuits.split(",")
     kw = dict(x.split("=", 1) for x in a.car_kw)
@@ -158,7 +159,7 @@ def main():
             except Exception as e:
                 print(f"{k}: {e}")
     else:
-        compare(a.year, keys, kw)
+        compare(a.year, keys, kw, car=a.car or ("2026" if a.year >= 2026 else "2025"))
 
 
 if __name__ == "__main__":
