@@ -10,6 +10,7 @@ venv/
 *.csv
 !tracks/*.csv
 !carsim/data/tracks/*.csv
+!carsim/data/tracks/elevation/*.csv
 /out/
 *.html
 !docs/**/*.html
