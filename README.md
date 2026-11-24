@@ -171,6 +171,21 @@ A driver trained before this starts with zero weight on the new inputs, so it dr
 (up to floating-point rounding); train a new run from it with `--init-from`. Resuming an older run
 with the new inputs archives it and starts afresh, like any change of inputs.
 
+**Track limits, run-off and barriers.** Leaving the track no longer ends the run on the spot.
+Beyond the kerbs each circuit has run-off and then a barrier (`carsim/runoff.py`; the data has no
+barrier positions, so they are estimated the way circuits are laid out): walls 1.5 m beyond the
+kerb on the street circuits (Monaco, Singapore, Baku, Jeddah, Las Vegas); elsewhere asphalt
+outside slow corners, gravel outside medium and fast ones (low grip, heavy drag: it stops the
+car) and grass along the straights and on the inside. The rules, as in F1:
+
+- all four wheels beyond the white line (kerbs are beyond the line) is a track-limits violation:
+  that lap does not count and costs a penalty
+- more than 3 s off in one go: disqualified (the run ends, like a crash)
+- a barrier: a crash
+
+The driver feels how long it has been off and sees the room to the barrier on each side. This is
+physics version 4: older drivers carry over with `--init-from` (`--carry-over` to resume a run).
+
 **The 2026 car and the driver's controls.** `--car 2026` trains on a car built to the 2026 rules
 (768 kg, 3.40 m wheelbase, 1.90 m wide, narrower tyres, ~400 kW engine + 350 kW MGU-K that fades out
 from 290 to 355 km/h, no MGU-H, active aero; sources and estimates in

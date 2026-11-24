@@ -142,6 +142,7 @@ class Car2D:
         self.fuel = self.p.fuel.start_kg
         self.fuel_flow = 0.0
         self.surface_grip = [1.0] * 4
+        self.surfaces = ["track"] * 4
         self._f_axle = (0.0, 0.0, 0.0)  # last tyre forces: front Fy, rear Fy, total Fx (body frame)
         self._update_mass()
         self._setup_suspension()
@@ -426,6 +427,7 @@ class Car2D:
                 floor = (cond.road_height(s_c + ds_c + self.a, off_c, True),
                          cond.road_height(s_c + ds_c - self.b, off_c, True))
         self.surface_grip = surf_grip  # what the driver feels through the seat (kerbs, grass, green track)
+        self.surfaces = surf  # what each wheel is on: track, kerb, grass, asphalt, gravel, barrier
         road_dot = [(road[i] - s.road[i]) / dt for i in range(4)]
         s.road = road
 
@@ -624,7 +626,8 @@ class Car2D:
         f_drag = ar.drag
         f_roll = c.crr * sum(loads) if s.vx > 0.1 else 0.0
         n_grass = surf.count("grass")
-        f_grass = cond.sp.grass_drag * n_grass if (cond is not None and s.vx > 0.1) else 0.0
+        f_grass = (cond.sp.grass_drag * n_grass + cond.sp.gravel_drag * surf.count("gravel")
+                   if (cond is not None and s.vx > 0.1) else 0.0)
         plank = 0.0
         if dynamic:
             _, plank = self._suspension(dt, ar, fxt, fyf + fyr, f_drag, road_dot, g_eff, road, floor)
