@@ -201,3 +201,79 @@ def test_named_run_goes_to_its_own_folder(tmp_path, monkeypatch):
                       episode=EpisodeConfig(track="short", max_time=1.0, laps=1))
     train(cfg, workers=1, generations=1, log=lambda *a: None)
     assert (tmp_path / "exp1" / "policy.npy").exists() and not (tmp_path / "short").exists()
+
+
+# ---- training fixes after the Monza runs (notebook 04) -------------------------------------
+def _info(laps, progress, valid=None):
+    return 0.0, {"laps": laps, "progress": progress, "laps_valid": valid or [True] * len(laps)}
+
+
+def test_selection_puts_laps_before_speed():
+    from carsim.learn import selection_score
+    tests = [EpisodeConfig(track="short"), EpisodeConfig(track="test")]
+    L = [learn._track("short").length, learn._track("test").length]
+    fast_easy = [_info([40.0, 40.0, 40.0], 3 * L[0]), _info([], 0.4 * L[1])]  # quick, but off early
+    slow_far = [_info([70.0, 70.0, 70.0], 3 * L[0]), _info([90.0], 1.5 * L[1])]  # slower, further
+    s_fast = selection_score(fast_easy, tests, 3)
+    s_slow = selection_score(slow_far, tests, 3)
+    assert s_slow > s_fast  # the old score would rank fast_easy first (its lap time bonus)
+    assert s_fast == pytest.approx(3.4, abs=0.01) and s_slow == pytest.approx(4.5, abs=0.01)
+    # all laps done everywhere: only then does speed decide, and less than a few metres would
+    quick = selection_score([_info([40.0] * 3, 3 * L[0]), _info([80.0] * 3, 3 * L[1])], tests, 3)
+    slow = selection_score([_info([60.0] * 3, 3 * L[0]), _info([99.0] * 3, 3 * L[1])], tests, 3)
+    assert 6.0 < slow < quick < 6.01
+    # a lap with a track-limits violation counts for nothing
+    dirty = selection_score([_info([40.0] * 3, 3 * L[0], [True, False, True]), _info([80.0] * 3, 3 * L[1])], tests, 3)
+    assert dirty == pytest.approx(5.0, abs=0.01)
+
+
+def test_reversal_penalty_counts_steering_direction_changes():
+    pol = Policy(N_OBS).init_random(np.random.default_rng(0))
+    kw = dict(track="short", max_time=3.0)
+    f0, info = run_episode(pol.theta, EpisodeConfig(**kw))
+    f1, _ = run_episode(pol.theta, EpisodeConfig(**kw, reversal_penalty=4.0))
+    assert info["reversals"] >= 0 and f1 == pytest.approx(f0 - 4.0 * info["reversals"])
+
+
+def test_speed_bonus_pays_more_the_faster_the_run():
+    pol = Policy(N_OBS).init_random(np.random.default_rng(0))
+    kw = dict(track="short", max_time=3.0, start_speed=20.0)
+    f0, info = run_episode(pol.theta, EpisodeConfig(**kw))
+    f1, _ = run_episode(pol.theta, EpisodeConfig(**kw, speed_bonus=2.0))
+    if info["reason"] in ("off track", "barrier", "disqualified", "stuck"):
+        assert f1 == pytest.approx(f0)  # a crash earns no speed bonus
+    else:
+        v = info["progress"] / info["time"]
+        assert f1 == pytest.approx(f0 + 2.0 * info["progress"] * v / learn.SPEED_BONUS_REF)
+
+
+def test_practice_tracks_are_practised_and_tested_every_generation():
+    from carsim.learn import practice_runs, test_configs
+    cfg = TrainConfig(track="random", starts=8, tracks_per_gen=4, practice_tracks=("monza",))
+    rng = np.random.default_rng(1)
+    for gen in range(4):
+        runs = practice_runs(cfg, rng, gen)
+        assert "monza" in {r.track for r in runs}
+        assert sum(not r.track.startswith(("random:", "power:")) for r in runs) <= 3  # 1 of 4 circuits
+    assert [practice_runs(cfg, rng, g)[0].track == "monza" for g in range(4)].count(True) == 1  # line run rotates
+    assert [t.track for t in test_configs(cfg)][-1] == "monza"
+
+
+def test_calendar_circuits_cannot_be_practice_tracks(tmp_path, monkeypatch):
+    monkeypatch.setattr(learn, "RUNS_DIR", tmp_path)
+    with pytest.raises(ValueError):
+        train(TrainConfig(track="random", practice_tracks=("f1:monza",)), workers=1, generations=1)
+
+
+def test_progress_keeps_the_columns_of_a_run_started_earlier(tmp_path, monkeypatch):
+    monkeypatch.setattr(learn, "RUNS_DIR", tmp_path)
+    d = tmp_path / "short"
+    d.mkdir()
+    old_header = learn.PROGRESS_HEADER.rsplit(",", 1)[0]
+    (d / "progress.csv").write_text(old_header + "\n")
+    cfg = TrainConfig(track="short", population=2, starts=1, laps=1, select="laps",
+                      episode=EpisodeConfig(track="short", max_time=1.0, laps=1))
+    train(cfg, workers=1, generations=1, log=lambda *a: None)
+    lines = (d / "progress.csv").read_text().strip().splitlines()
+    assert all(ln.count(",") == old_header.count(",") for ln in lines)
+    assert str(np.load(d / "checkpoint.npz")["select"]) == "laps"

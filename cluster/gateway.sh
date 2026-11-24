@@ -130,10 +130,11 @@ submit)
     case "$f" in
       --carry-over|--legacy-car) flags+=("$f"); i=$((i+1)); continue ;;
       --track|--test-track) need "$f" "$v" "$RE_TRACK" ;;
-      --tracks) need "$f" "$v" "$RE_TRACKS" ;;
+      --tracks|--practice-tracks) need "$f" "$v" "$RE_TRACKS" ;;
+      --select) need "$f" "$v" '^(score|laps)$' ;;
       --init-from) need "$f" "$v" "$RE_RUN" ;;
       --population|--laps|--starts|--generations|--tracks-per-gen|--test-laps|--test-every) need "$f" "$v" "$RE_INT" ;;
-      --power-share|--fast-corner-share|--steer-penalty|--max-time) need "$f" "$v" "$RE_NUM" ;;
+      --power-share|--fast-corner-share|--steer-penalty|--max-time|--speed-bonus|--reversal-penalty) need "$f" "$v" "$RE_NUM" ;;
       *) die "flag not allowed: $f" ;;
     esac
     flags+=("$f" "$v"); i=$((i+2))

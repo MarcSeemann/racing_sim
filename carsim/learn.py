@@ -287,6 +287,10 @@ class EpisodeConfig:
     time_bonus: float = 0.0  # fitness per second saved reaching max_distance faster than ref_speed
     ref_speed: float = 15.0  # m/s; reaching the cap slower than this earns no time bonus
     steer_penalty: float = 0.0  # fitness lost per rad the steering travels (sawing at the wheel)
+    reversal_penalty: float = 0.0  # fitness lost per change of steering direction (steps > REVERSAL_STEP)
+    # Fitness per metre covered, times the average speed / SPEED_BONUS_REF, on runs that do not crash:
+    # unlike time_bonus (which saturates), going faster always pays.
+    speed_bonus: float = 0.0
     # The car and the track (realistic = the same car and conditions as the 3D view).
     realistic: bool = True  # False: the old training car (no fuel, tyres always optimal, no kerbs/grass)
     fuel_kg: float = 40.0
@@ -352,6 +356,8 @@ def controls(act, car, track, i: int) -> Inputs:
 
 
 DSQ_OFFTRACK_S = 3.0  # s with all four wheels beyond the white lines: disqualified
+REVERSAL_STEP = 0.002  # rad per control step: smaller steering moves do not count as a direction change
+SPEED_BONUS_REF = 50.0  # m/s: speed_bonus pays speed_bonus per metre at this average speed
 
 
 def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32, 32)):
@@ -371,7 +377,8 @@ def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32,
     rows = []
     slow = 0.0
     steer_travel = 0.0
-    limits = cfg.track_limits and car.cond is not None and getattr(track, "_rl", None) is not None
+    reversals, steer_dir = 0, 0.0
+    limits =cfg.track_limits and car.cond is not None and getattr(track, "_rl", None) is not None
     car.offtrack_time = 0.0
     violations, lap_clean, valid = 0, True, []  # valid[k]: lap k had no track-limits violation
     was_off = False
@@ -384,7 +391,12 @@ def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32,
         before = s.steer
         for _ in range(n_sub):
             car.step(inp, cfg.phys_dt, row=False)
-        steer_travel += abs(s.steer - before)
+        moved = s.steer - before
+        steer_travel += abs(moved)
+        if abs(moved) > REVERSAL_STEP:
+            if steer_dir and np.sign(moved) != steer_dir:
+                reversals += 1
+            steer_dir = float(np.sign(moved))
         i = track.nearest(s.x, s.y, i)
         s_now = track.s[i]
         ds = s_now - last_s
@@ -426,7 +438,11 @@ def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32,
         if len(lap_times) >= cfg.laps:
             reason = "lap"
             break
-    fitness = progress + cfg.alive_bonus * s.t - cfg.steer_penalty * steer_travel - cfg.limits_penalty * violations
+    fitness = (progress + cfg.alive_bonus * s.t - cfg.steer_penalty * steer_travel
+               - cfg.reversal_penalty * reversals - cfg.limits_penalty * violations)
+    crashed = reason in ("off track", "barrier", "disqualified", "stuck")
+    if cfg.speed_bonus and not crashed and progress > 0 and s.t > 0:
+        fitness += cfg.speed_bonus * progress * (progress / s.t) / SPEED_BONUS_REF
     if reason in ("off track", "barrier", "disqualified"):
         fitness -= cfg.crash_penalty + cfg.crash_speed_penalty * s.speed
     elif reason == "stuck":  # never cheaper than a fast crash, or standing still becomes attractive
@@ -437,7 +453,7 @@ def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32,
     if clean and cfg.lap_bonus:  # finishing matters most; faster laps score more; deleted laps count for nothing
         fitness += lap_score(clean, cfg.laps, track.length) if len(clean) == len(lap_times) else 1000.0 * len(clean)
     info = {"progress": progress, "laps": lap_times, "reason": reason, "time": s.t, "speed": s.speed,
-            "steer_travel": steer_travel, "track": cfg.track, "violations": violations,
+            "steer_travel": steer_travel, "reversals": reversals, "track": cfg.track, "violations": violations,
             "laps_valid": valid}
     return (fitness, info, rows) if record else (fitness, info)
 
@@ -484,6 +500,15 @@ class TrainConfig:
     steer_penalty: float = 0.0  # practice runs: fitness lost per rad of steering travel
     test_laps: int = 0  # laps of the unseen test circuit (0 = `laps`)
     name: str | None = None  # run name (ai_runs/<name>/); default: from the track(s)
+    # How the best driver (policy.npy) is picked from the tests: "score" = the sum of the test
+    # fitnesses (lap time bonus included); "laps" = selection_score: laps covered first, speed only
+    # as a tie-break, every circuit counting the same.
+    select: str = "score"
+    # random mode: named circuits practised EVERY generation alongside the new ones (they take the
+    # place of new circuits in tracks_per_gen), and also tested from the line to pick the best driver.
+    practice_tracks: tuple = ()
+    speed_bonus: float = 0.0  # practice runs: EpisodeConfig.speed_bonus
+    reversal_penalty: float = 0.0  # practice runs: EpisodeConfig.reversal_penalty
 
     @property
     def random(self) -> bool:
@@ -570,14 +595,15 @@ def run_dir(track: str) -> Path:
 
 
 PROGRESS_HEADER = ("generation,practice_mean,practice_best,best_ever,test_progress_m,test_lap_done,"
-                   "test_lap_s,minutes,test_laps,test_total_s,test_steer_rad_per_s,unseen_progress_m,unseen_lap_s")
+                   "test_lap_s,minutes,test_laps,test_total_s,test_steer_rad_per_s,unseen_progress_m,unseen_lap_s,"
+                   "tests")
 
 
 def save_checkpoint(path: Path, theta, adam, gen, best, cfg, history):
     path.mkdir(parents=True, exist_ok=True)
     tmp = path / "checkpoint.tmp.npz"
     np.savez(tmp, theta=theta, m=adam.m, v=adam.v, t=adam.t, gen=gen,
-             best_theta=best["theta"], best_fitness=best["fitness"])
+             best_theta=best["theta"], best_fitness=best["fitness"], select=getattr(cfg, "select", "score"))
     os.replace(tmp, path / "checkpoint.npz")
     np.save(path / "policy.tmp.npy", best["theta"])
     os.replace(path / "policy.tmp.npy", path / "policy.npy")  # the best driver so far (for drive / 3D)
@@ -585,7 +611,12 @@ def save_checkpoint(path: Path, theta, adam, gen, best, cfg, history):
     meta["obs_names"] = OBS_NAMES
     meta["physics_version"] = PHYSICS_VERSION
     (path / "config.json").write_text(json.dumps(meta, indent=1))
-    with open(path / "progress.csv", "a") as fh:
+    prog = path / "progress.csv"
+    if prog.exists() and prog.stat().st_size:
+        with open(prog) as fh:
+            n_cols = fh.readline().count(",") + 1
+        history = ",".join(history.split(",")[:n_cols])  # a run started before a column was added
+    with open(prog, "a") as fh:
         if fh.tell() == 0:
             fh.write(PROGRESS_HEADER + "\n")
         fh.write(history + "\n")
@@ -636,6 +667,10 @@ def _load_start(out: Path, cfg: TrainConfig, policy, adam, log, init_from: str |
         if not migrated:
             policy.theta, adam.m, adam.v, adam.t, gen = theta, d["m"], d["v"], int(d["t"]), int(d["gen"])
             best = {"theta": d["best_theta"], "fitness": float(d["best_fitness"])}
+            saved_select = str(d["select"]) if "select" in d.files else "score"
+            if saved_select != cfg.select:  # the old best score is on another scale: judge afresh
+                best["fitness"] = -np.inf
+                log(f"best driver now picked by {cfg.select!r} (was {saved_select!r}): its score starts afresh")
             log(f"resuming {cfg.run_name()} from generation {gen} (best fitness {best['fitness']:.0f})")
             return gen, best
         # Older layout = older physics: archive it and restart the optimiser and the scores (old
@@ -663,14 +698,17 @@ def practice_runs(cfg: TrainConfig, rng, gen: int) -> list:
     ep = cfg.episode
     common = dict(laps=99, lap_bonus=False, crash_speed_penalty=cfg.crash_speed_penalty,
                   time_bonus=cfg.time_bonus, realistic=ep.realistic, rubber=ep.rubber, phys_dt=ep.phys_dt,
-                  downforce=ep.downforce, car=ep.car, steer_penalty=cfg.steer_penalty)
+                  downforce=ep.downforce, car=ep.car, steer_penalty=cfg.steer_penalty,
+                  speed_bonus=cfg.speed_bonus, reversal_penalty=cfg.reversal_penalty)
     if cfg.random:  # new circuits every generation (seeds >= 1000: never a validation circuit)
-        names = []
-        for _ in range(cfg.tracks_per_gen):
+        names = list(cfg.practice_tracks)
+        for _ in range(max(cfg.tracks_per_gen - len(names), 1)):
             seed = int(rng.integers(1000, 2**31))
             kind = "power" if cfg.power_share and rng.random() < cfg.power_share else "random"
             names.append(f"{kind}:{seed}")
-        line_track, line_laps = names[0], cfg.random_line_laps
+        # with fixed practice circuits the run from the line takes turns between all of them
+        line_track = names[gen % len(names)] if cfg.practice_tracks else names[0]
+        line_laps = cfg.random_line_laps
     else:
         names = cfg.track_list()
         line_track, line_laps = names[gen % len(names)], cfg.laps
@@ -711,16 +749,44 @@ def practice_runs(cfg: TrainConfig, rng, gen: int) -> list:
 def test_configs(cfg: TrainConfig) -> list:
     """The real tests: `laps` laps from the line on every training track (random mode: on the
     held-out validation circuits)."""
-    names = list(cfg.validation) if cfg.random else cfg.track_list()
+    names = list(cfg.validation) + [n for n in cfg.practice_tracks if n not in cfg.validation] \
+        if cfg.random else cfg.track_list()
     return [dataclasses.replace(cfg.episode, track=n, laps=cfg.laps, start_s=0.0, max_distance=0.0, lap_bonus=True,
                                 max_time=max(cfg.episode.max_time, default_max_time(n, cfg.laps)) if not cfg.random
                                 else default_max_time(n, cfg.laps)) for n in names]
 
 
+def selection_score(test_res, tests, laps: int) -> float:
+    """How good a driver is on the tests, for select="laps": the laps it covers first, its speed second.
+
+    Each circuit adds the laps covered from the line (a lap with a track-limits violation counts
+    nothing, the lap it went off on counts by distance; at most `laps`), so a lap of any circuit is
+    worth the same. Speed is only a tie-break: 0.01 x the average speed (m/s / 100) over the
+    circuits it finished, so 5-20 m more distance beats any lap time."""
+    covered, speeds = 0.0, []
+    for t, (_, info) in zip(tests, test_res):
+        L = _track(t.track).length
+        done = len(info["laps"])
+        clean = sum(1 for ok in info.get("laps_valid", [True] * done)[:laps] if ok)
+        frac = 0.0 if done >= laps else max(info["progress"] / L - done, 0.0)
+        covered += min(clean + frac, laps)
+        if done >= laps:
+            speeds.append(laps * L / sum(info["laps"][:laps]))
+    return covered + 0.01 * (sum(speeds) / len(tests)) / 100.0
+
+
+def _test_detail(tests, test_res) -> str:
+    """Per-circuit test results for progress.csv: track:laps:progress_m:time_s:reversals, joined by ';'."""
+    return ";".join(f"{t.track}:{len(r[1]['laps'])}:{r[1]['progress']:.0f}:{r[1]['time']:.1f}:"
+                    f"{r[1].get('reversals', 0)}" for t, r in zip(tests, test_res))
+
+
 def train(cfg: TrainConfig, workers: int = 2, generations: int | None = None, hours: float | None = None,
           log=print, init_from: str | None = None, carry_over: bool = False):
     """Train (or continue training) the driver for cfg's track(s). Ctrl+C stops after saving."""
-    hidden_from_training = [n for n in (*cfg.track_list(), *cfg.validation) if is_calendar(n)]
+    if cfg.select not in ("score", "laps"):
+        raise ValueError(f"select must be 'score' or 'laps', not {cfg.select!r}")
+    hidden_from_training = [n for n in (*cfg.track_list(), *cfg.validation, *cfg.practice_tracks) if is_calendar(n)]
     if hidden_from_training:  # the F1 calendar is a held-out test set: never practised on, never picks
         raise ValueError(f"{', '.join(hidden_from_training)}: the F1 calendar circuits are held out (report "
                          "only); drive them with python -m carsim.f1_calendar drive")
@@ -755,23 +821,28 @@ def train(cfg: TrainConfig, workers: int = 2, generations: int | None = None, ho
                 # Random mode: now and then a lap of a circuit it never trains on (reported only).
                 unseen = []
                 test_laps = cfg.test_laps or cfg.laps
-                if cfg.random and cfg.test_track and gen % cfg.test_every == 0:
+                if (cfg.random and cfg.test_track and cfg.test_track not in cfg.practice_tracks
+                        and gen % cfg.test_every == 0):
                     unseen = [dataclasses.replace(cfg.episode, track=cfg.test_track, laps=test_laps, start_s=0.0,
                                                   max_distance=0.0, lap_bonus=True,
                                                   max_time=default_max_time(cfg.test_track, test_laps))]
-                jobs = ([(th, runs, cfg.hidden) for th in thetas] + [(policy.theta, t, cfg.hidden) for t in tests]
-                        + [(policy.theta, t, cfg.hidden) for t in unseen])
+                # The tests (whole laps from the line) are the longest jobs: start them first, so they
+                # run alongside the practice runs instead of after them.
+                jobs = ([(policy.theta, t, cfg.hidden) for t in (*tests, *unseen)]
+                        + [(th, runs, cfg.hidden) for th in thetas])
                 results = list(ex.map(_eval_one, jobs))
-                fit = np.array([r[0] for r in results[:len(thetas)]])
-                test_res = results[len(thetas):len(thetas) + len(tests)]
-                un = results[-1][1] if unseen else None
+                n_t = len(tests) + len(unseen)
+                fit = np.array([r[0] for r in results[n_t:]])
+                test_res = results[:len(tests)]
+                un = results[len(tests)][1] if unseen else None
                 w = _ranks(fit)
                 grad = (w[:half] - w[half:]) @ eps / (half * cfg.sigma)
                 centre = policy.theta.copy()
                 policy.theta = policy.theta + adam.step(grad - cfg.weight_decay * policy.theta)
                 gen += 1
                 # The best driver is judged on the real test (laps from the line), not the practice runs.
-                centre_fit = float(sum(r[0] for r in test_res))
+                centre_fit = (selection_score(test_res, tests, cfg.laps) if cfg.select == "laps"
+                              else float(sum(r[0] for r in test_res)))
                 if centre_fit > best["fitness"]:
                     best = {"theta": centre, "fitness": centre_fit}
                 laps = [lt for r in test_res for lt in r[1]["laps"][:cfg.laps]]
@@ -785,7 +856,8 @@ def train(cfg: TrainConfig, workers: int = 2, generations: int | None = None, ho
                 line = (f"{gen},{fit.mean():.1f},{fit.max():.1f},{best['fitness']:.1f},{prog:.1f},"
                         f"{int(all_done)},{best_lap:.3f},{mins:.2f},{len(laps)},{total:.3f},{steer_rate:.3f},"
                         f"{un['progress'] if un else float('nan'):.1f},"
-                        f"{un['laps'][0] if un and un['laps'] else float('nan'):.3f}")
+                        f"{un['laps'][0] if un and un['laps'] else float('nan'):.3f},"
+                        f"{_test_detail(tests, test_res)}")
                 save_checkpoint(out, policy.theta, adam, gen, best, cfg, line)
                 parts = []
                 for t, r in zip(tests, test_res):
@@ -949,6 +1021,16 @@ def main(argv=None):
     t.add_argument("--tracks-per-gen", type=int, default=2, help="with --track random: new circuits per generation")
     t.add_argument("--test-laps", type=int, default=0, help="laps of the unseen test circuit (default: --laps)")
     t.add_argument("--test-every", type=int, default=5, help="generations between unseen-circuit tests")
+    t.add_argument("--select", choices=["score", "laps"], default="score",
+                   help="how the best driver is picked: score (sum of test fitness, lap-time bonus included) "
+                        "or laps (laps covered first, speed only as a tie-break)")
+    t.add_argument("--practice-tracks",
+                   help="with --track random: named circuits (e.g. monza) practised every generation alongside "
+                        "the new ones, and tested from the line to pick the best driver")
+    t.add_argument("--speed-bonus", type=float, default=0.0,
+                   help="practice runs that do not crash: fitness per metre x average speed / 50 m/s")
+    t.add_argument("--reversal-penalty", type=float, default=0.0,
+                   help="practice fitness lost per change of steering direction (discourages sawing)")
     pr = sub.add_parser("practice", help="free practice on a circuit, then the test (nothing is saved)")
     pr.add_argument("--policy", "--run", dest="run", required=True, help="the trained driver to start from")
     pr.add_argument("--track", required=True, help="circuit(s), comma-separated, e.g. f1:suzuka,f1:spa")
@@ -970,7 +1052,12 @@ def main(argv=None):
         if any(is_calendar(n) for n in (a.track, *tracks)):
             ap.error("the f1:<key> circuits (2026 calendar) are a held-out test set and are never trained on; "
                      "drive them with: python -m carsim.f1_calendar drive --policy <run>")
-        for n in tracks:
+        practice = tuple(x.strip() for x in a.practice_tracks.split(",")) if a.practice_tracks else ()
+        if practice and a.track != "random":
+            ap.error("--practice-tracks needs --track random")
+        if any(is_calendar(n) for n in practice):
+            ap.error("the f1:<key> circuits (2026 calendar) are a held-out test set and are never trained on")
+        for n in (*tracks, *practice):
             if n not in TRACKS or n == "random":
                 ap.error(f"unknown track {n!r} (short, test, hill, monza, random:<seed> or power:<seed>)")
         named = tracks or (a.track,)
@@ -982,7 +1069,9 @@ def main(argv=None):
                           laps=a.laps, starts=a.starts, test_track=a.test_track, episode=ep, name=a.name,
                           power_share=a.power_share, fast_corner_share=a.fast_corner_share,
                           steer_penalty=a.steer_penalty, tracks_per_gen=a.tracks_per_gen,
-                          test_laps=a.test_laps, test_every=a.test_every, validation=validation)
+                          test_laps=a.test_laps, test_every=a.test_every, validation=validation,
+                          select=a.select, practice_tracks=practice, speed_bonus=a.speed_bonus,
+                          reversal_penalty=a.reversal_penalty)
         what = "new random circuits every generation" if cfg.random else ", ".join(cfg.track_list())
         print(f"training a driver for {what} ({a.laps} laps) with {a.workers} workers; "
               f"checkpoints in {run_dir(cfg.run_name())}/")
