@@ -206,8 +206,9 @@ Use these names with `--track` anywhere:
 
     short, test, hill              made-up circuits (1.1 km, 2.5 km, 2.5 km with 23 m of elevation)
     monza                          Autodromo Nazionale Monza, 5.79 km, real centreline and widths
+    sepang                         Sepang International Circuit, 5.54 km, real centreline and widths
     random:<seed>                  a random circuit, the same one for the same seed
-    f1:<key>                       the 24 circuits of the 2026 F1 calendar (held out, see below)
+    f1:<key>                       the 25 circuits of the 2026 F1 calendar (held out, see below)
 
 Track width can vary round the lap, and differently on each side of the centreline
 (`Track.width_left`, `Track.width_right`). Monza comes from the
@@ -219,8 +220,9 @@ satellite images (about 9.4 m on average), no elevation.
 
 ### The 2026 F1 calendar: a held-out test set
 
-All 24 circuits of the 2026 calendar (`carsim/f1_calendar.py`, `f1:melbourne` ... `f1:yas_marina`;
-Bahrain and Saudi Arabia, cancelled during the season, are kept). Like Monza they are an exam,
+All 25 circuits of the 2026 calendar (`carsim/f1_calendar.py`, `f1:melbourne` ... `f1:yas_marina`;
+Bahrain and Saudi Arabia, cancelled during the season, are kept; Sepang, which joined the calendar
+in their place, is `f1:sepang`). Like Monza they are an exam,
 never practice: `learn.py train` refuses them as training or validation tracks, so no driver is
 ever trained on them or picked by them. Drive a trained driver round the lot (nothing is saved
 into the run):

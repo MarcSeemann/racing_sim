@@ -1,4 +1,4 @@
-"""The 2026 F1 calendar: 24 real circuits kept as a held-out (report-only) test set."""
+"""The 2026 F1 calendar: 25 real circuits kept as a held-out (report-only) test set."""
 import argparse
 
 import numpy as np
@@ -13,11 +13,11 @@ from carsim.trackgen import track_stats
 ANTICLOCKWISE = {"jeddah", "miami", "baku", "singapore", "austin", "interlagos", "las_vegas", "yas_marina"}
 
 
-def test_the_calendar_has_24_rounds_in_order():
-    assert [c.round for c in CALENDAR] == list(range(1, 25))
-    assert len(BY_KEY) == 24 and len(track_names()) == 24
+def test_the_calendar_has_25_rounds_in_order():
+    assert [c.round for c in CALENDAR] == list(range(1, 26))  # 25 = Sepang, added during the season
+    assert len(BY_KEY) == 25 and len(track_names()) == 25
     assert {c.key for c in CALENDAR if c.cancelled} == {"bahrain", "jeddah"}
-    assert len(track_names(include_cancelled=False)) == 22
+    assert len(track_names(include_cancelled=False)) == 23
 
 
 @pytest.mark.parametrize("c", CALENDAR, ids=lambda c: c.key)
@@ -73,3 +73,12 @@ def test_random_practice_never_draws_a_calendar_circuit():
     names = {r.track for g in range(30) for r in learn.practice_runs(cfg, rng, g)}
     names |= {t.track for t in learn.test_configs(cfg)}
     assert names and not any(is_calendar(n) for n in names)
+
+
+def test_sepang_is_a_training_circuit_and_a_held_out_one():
+    from carsim.circuits import get_track
+    from carsim.f1_calendar import is_calendar
+    tr = get_track("sepang")
+    assert tr.length == pytest.approx(5543, rel=0.01)
+    assert get_track("f1:sepang").length == pytest.approx(tr.length)
+    assert is_calendar("f1:sepang") and not is_calendar("sepang")
