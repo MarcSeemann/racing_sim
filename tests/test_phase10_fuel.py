@@ -78,6 +78,9 @@ def test_fuel_costs_lap_time(fuel_laps):
 
 def test_laps_get_faster_as_fuel_burns(fuel_laps):
     log, laps = fuel_laps[60.0]
-    assert laps[2] < laps[1]
+    light = fuel_laps[5.0][1]
+    # Tyre wear slows both cars a few ms a lap (as much as burning ~0.7 kg gains), so compare the
+    # lap-to-lap change against the light car's: the heavy car loses more weight per lap.
+    assert laps[2] - laps[1] < light[2] - light[1]
     per_lap = log["fuel"][0] - log["fuel"][-1]
     assert 0.3 < per_lap / 3 < 1.5  # kg per 1.1 km lap

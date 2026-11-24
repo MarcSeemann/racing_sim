@@ -10,14 +10,15 @@ A minimum-curvature line is the classic first approximation of the fastest line:
 it straightens corners (outside-apex-outside), so corner speeds go up.
 """
 import numpy as np
+from scipy.interpolate import CubicSpline
 from scipy.optimize import lsq_linear
 from scipy.sparse import lil_matrix
 
 from .track import Track
 
 
-def min_curvature_offsets(track: Track, margin: float = 1.5, step: int = 4) -> np.ndarray:
-    """Lateral offsets (m, + = left of centreline) at every centreline point."""
+def _solve(track: Track, margin: float, step: int):
+    """The bounded least-squares problem on evenly spaced coarse samples: (idx, offsets there)."""
     # Evenly spaced samples all the way round, including the gap that closes the lap
     # (an odd short gap at the start line would put a kink in the line).
     m_pts = max(len(track.s) // step, 8)
@@ -35,31 +36,45 @@ def min_curvature_offsets(track: Track, margin: float = 1.5, step: int = 4) -> n
             A[2 * i, j] += w * nx[j]
             A[2 * i + 1, j] += w * ny[j]
     # Per-sample limits: the track can be wider on one side of its centreline than the other.
-    lo_full = -(track.width_right - margin)
-    hi_full = track.width_left - margin
-    lo, hi = lo_full[idx], hi_full[idx]
+    lo = -(track.width_right[idx] - margin)
+    hi = track.width_left[idx] - margin
     bad = lo >= hi  # narrower than twice the margin: stay on the middle of the tarmac
     mid = (hi + lo) / 2
     lo, hi = np.where(bad, mid - 1e-3, lo), np.where(bad, mid + 1e-3, hi)
     res = lsq_linear(A.tocsr(), b, bounds=(lo, hi), method="trf", lsmr_tol="auto", max_iter=500)
-    # Back to full resolution (periodic interpolation), lightly smoothed.
-    s_c = track.s[idx]
-    n_full = np.interp(track.s, np.append(s_c, track.length), np.append(res.x, res.x[0]))
-    k = np.ones(5) / 5
-    n_full = np.convolve(np.concatenate([n_full[-5:], n_full, n_full[:5]]), k, "same")[5:-5]
-    return np.clip(n_full, np.minimum(lo_full, hi_full), np.maximum(lo_full, hi_full))
+    return idx, res.x
+
+
+def _line_points(track: Track, margin: float, step: int):
+    """Dense (x, y) of the line and its lateral offsets from the centreline at every centreline sample.
+
+    The line is a periodic cubic spline through the optimised coarse points themselves, not
+    "centreline + interpolated offset": the latter kept every few-metre wiggle of the surveyed
+    centreline (and, with linear interpolation, a kink at each coarse point). Those curvature spikes
+    capped the corner speeds of the lap-time model by ~10 % although the car could drive straight
+    through them."""
+    idx, n_c = _solve(track, margin, step)
+    h = track.heading[idx]
+    xc, yc = track.x[idx] - n_c * np.sin(h), track.y[idx] + n_c * np.cos(h)
+    s_c = np.append(track.s[idx], track.length)
+    x = CubicSpline(s_c, np.append(xc, xc[0]), bc_type="periodic")(track.s)
+    y = CubicSpline(s_c, np.append(yc, yc[0]), bc_type="periodic")(track.s)
+    n = (y - track.y) * np.cos(track.heading) - (x - track.x) * np.sin(track.heading)
+    lo, hi = -(track.width_right - margin), track.width_left - margin
+    return x, y, np.clip(n, np.minimum(lo, hi), np.maximum(lo, hi))
+
+
+def min_curvature_offsets(track: Track, margin: float = 1.5, step: int = 4) -> np.ndarray:
+    """Lateral offsets (m, + = left of centreline) at every centreline point."""
+    return _line_points(track, margin, step)[2]
 
 
 def racing_line(track: Track, margin: float = 1.5, step: int = 4):
     """(line Track with one sample per centreline sample, offsets array)."""
-    n = min_curvature_offsets(track, margin, step)
-    x = track.x - n * np.sin(track.heading)
-    y = track.y + n * np.cos(track.heading)
+    x, y, n = _line_points(track, margin, step)
     line = Track.from_samples(f"{track.name} racing line", x, y, track.z, track.width,
                               width_left=track.width_left - n, width_right=track.width_right + n)
     return line, n
-
-
 
 
 def cached_racing_line(track: Track, margin: float = 1.5, step: int = 4):

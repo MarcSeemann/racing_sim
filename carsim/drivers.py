@@ -187,17 +187,24 @@ class LapDriver:
             eff = self.lat_eff if curve is tp.lateral else 1.0
             return curve.mu0 * f * tp.grip_scale * gj * margin * eff
 
+        # The car's own power at the wheels (best gear, ERS) and its rev-limited top speed; this
+        # replaced a flat 644 kW and a 90 m/s (324 km/h) cap on the plan.
+        key = id(p)
+        if getattr(self, "_power_key", None) != key:
+            from .lapsim import wheel_power_curve
+            self._power_curve, self._power_key = wheel_power_curve(p), key
+        pv, pw, v_rev = self._power_curve
+        v_cap2 = float(v_rev) ** 2
         k = np.abs(tr.curvature)
-        v2 = np.full(len(k), 90.0 ** 2)
+        v2 = np.full(len(k), v_cap2)
         for _ in range(30):  # fixed point: v^2 k = mu(v) (g + down v^2)
             mu_y = mu(tp.lateral, v2)
             with np.errstate(divide="ignore", invalid="ignore"):
-                v2_new = np.where(k > 1e-6, mu_y * G / np.maximum(k - mu_y * down, 1e-9), 90.0 ** 2)
-            v2_new = np.where(k - mu_y * down > 1e-9, v2_new, 90.0 ** 2)
-            v2 = np.minimum(0.5 * v2 + 0.5 * v2_new, 90.0 ** 2)
+                v2_new = np.where(k > 1e-6, mu_y * G / np.maximum(k - mu_y * down, 1e-9), v_cap2)
+            v2_new = np.where(k - mu_y * down > 1e-9, v2_new, v_cap2)
+            v2 = np.minimum(0.5 * v2 + 0.5 * v2_new, v_cap2)
         v = np.minimum(np.sqrt(v2), v_aqua)
         n, ds = len(v), np.diff(np.append(tr.s, tr.length))
-        p_max = 7.0e5 * 0.92  # W at the wheels, rough
         lat_cap = lambda vv, gj: mu_s(tp.lateral, vv * vv, gj) * (G + down * vv * vv)
         long_cap = lambda vv, gj: mu_s(tp.longitudinal, vv * vv, gj) * (G + down * vv * vv)
         v = [float(x) for x in v]
@@ -217,7 +224,7 @@ class LapDriver:
                 a, b = j % n, (j + 1) % n
                 va = max(v[a], 5.0)
                 a_trac = 0.55 * long_cap(va, g_l[a])
-                a_pow = p_max / (m * va) - 0.5 * rho * p.aero.CdA * va * va / m - G * sl[a]
+                a_pow = float(np.interp(va, pv, pw)) / (m * va) - 0.5 * rho * p.aero.CdA * va * va / m - G * sl[a]
                 lat = va * va * k[a] / lat_cap(va, g_l[a])
                 a_av = max(min(a_trac, a_pow), 0.0) * math.sqrt(max(1 - min(lat, 1.0) ** 2, 0.0))
                 v[b] = min(v[b], math.sqrt(va * va + 2 * a_av * ds[a]))

@@ -24,6 +24,12 @@ from .params import G, CarParams, Environment, pressure_at_altitude
 from .powertrain import RPM_TO_RADS, full_throttle_torque, overall_ratio
 
 
+# The car-only line: as close to the edges as a real car goes (its centre 0.5 m inside the white
+# line: a wheel on the kerb), solved on points 8 m apart. Finer points let the line follow the
+# few-metre wiggles of the surveyed centreline, which no car follows; they cost ~5 % of lap time.
+LINE_MARGIN, LINE_STEP = 0.5, 8
+
+
 def wheel_power_curve(p: CarParams, v_max: float = 130.0, n: int = 260):
     """(speeds m/s, power at the wheels W, top-gear rev-limit speed m/s): best gear at each speed."""
     v = np.linspace(1.0, v_max, n)
@@ -54,7 +60,7 @@ def lap(track, params: CarParams, env: Environment | None = None, fuel_kg: float
     aero zones (carsim.aero_zones); closed under braking and in corners.
     Returns time (s), s and v (m/s) along the line, top_speed_kmh, and the minimum speeds."""
     from .racing_line import cached_racing_line
-    path = cached_racing_line(track)[0] if line == "racing" else track
+    path = cached_racing_line(track, LINE_MARGIN, LINE_STEP)[0] if line == "racing" else track
     if env is None:
         env = Environment()
         if getattr(track, "altitude_m", None) is not None:

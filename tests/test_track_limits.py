@@ -76,4 +76,4 @@ def test_new_inputs_extend_the_layout_and_old_drivers_carry_over():
     old = Policy(len(learn.OBS_V4)).init_random(np.random.default_rng(3))
     theta, migrated = learn.adapt_theta(old.theta)
     assert migrated and theta.size == Policy(learn.N_OBS).size
-    assert learn.PHYSICS_VERSION == 4
+    assert learn.PHYSICS_VERSION >= 4  # 4 brought track limits (later versions keep them)

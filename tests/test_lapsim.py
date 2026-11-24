@@ -45,3 +45,22 @@ def test_power_curve_uses_the_gearbox():
     v, p, top = wheel_power_curve(race_car(0.0))
     assert np.all(p >= 0) and p.max() > 5e5  # several hundred kW at the wheels
     assert top * 3.6 > 380.0  # the top gear is long enough for Monza
+
+
+def test_racing_line_is_no_noisier_than_the_centreline():
+    # The line is a spline through the optimised points; it used to keep every few-metre wiggle of the
+    # survey plus a kink every 4 m, curvature spikes that capped the corner speeds of this model.
+    from carsim.lapsim import LINE_MARGIN, LINE_STEP
+    from carsim.racing_line import cached_racing_line
+    tr = get_track("monza")
+    line = cached_racing_line(tr, LINE_MARGIN, LINE_STEP)[0]
+    wiggle = lambda t: float(np.sum(np.abs(np.diff(t.curvature))))
+    assert wiggle(line) < wiggle(tr)
+    assert np.all(line.width_left >= LINE_MARGIN - 0.05) and np.all(line.width_right >= LINE_MARGIN - 0.05)
+
+
+def test_calibrated_car_laps_monza_close_to_the_2025_pole():
+    # docs/calibration/2025.md: Verstappen 1:18.792; the car-only lap is a few per cent slower
+    r = lap(get_track("monza"), race_car(10.0, downforce="low"))
+    assert 78.792 * 0.97 < r["time"] < 78.792 * 1.06
+    assert 340.0 < r["top_speed_kmh"] < 370.0  # ~350-360 km/h with DRS

@@ -264,9 +264,14 @@ F1_2025 = {
     "max_fuel_kg": 110.0,
 }
 
-# Downforce trims: (ClA, CdA, front balance). Estimates for a 2022-2025 car: "low" is a Monza
-# wing, "high" a Monaco/Hungary wing; "medium" is the generic car of the earlier phases.
-TRIMS = {"low": (3.2, 0.85, 0.41), "medium": (4.0, 1.10, 0.42), "high": (4.7, 1.30, 0.43)}
+# Downforce trims: (ClA, CdA, front balance) of a 2022-2025 car: "low" is a Monza wing, "high" a
+# Monaco/Hungary wing. Calibrated (docs/calibration/2025.md) against the 2025 pole laps with the
+# lap-time model: x1.25 downforce and x1.45 drag on the first estimates (which were 21 % too slow);
+# Monza top speed ~356 km/h with DRS, ~5-6 g at 300 km/h, downforce = weight at ~185 km/h.
+TRIMS = {"low": (4.00, 1.23, 0.41), "medium": (5.00, 1.60, 0.42), "high": (5.88, 1.89, 0.43)}
+# Tyres of the calibrated car: more grip at low load, falling off faster with load (real slicks are
+# strongly load-sensitive); braking grip rises less than cornering grip (peak braking ~5-6 g).
+TYRE_2025 = {"lateral_mu0": 2.38, "longitudinal_mu0": 2.10, "load_sensitivity": -0.25}
 
 
 def f1_2025(fuel_kg: float = 0.0, downforce: str = "medium", **kw) -> CarParams:
@@ -283,6 +288,9 @@ def f1_2025(fuel_kg: float = 0.0, downforce: str = "medium", **kw) -> CarParams:
     p.fuel.capacity_kg = r["max_fuel_kg"]
     p.fuel.start_kg = fuel_kg
     p.aero.ClA, p.aero.CdA, p.aero.front_balance = TRIMS[downforce]
+    p.tyres.lateral.mu0 = TYRE_2025["lateral_mu0"]
+    p.tyres.longitudinal.mu0 = TYRE_2025["longitudinal_mu0"]
+    p.tyres.load_sensitivity = TYRE_2025["load_sensitivity"]
     return p
 
 
@@ -306,8 +314,11 @@ F1_2026 = {
     "mguk_kw": 350.0,  # 2025: 120 kW (and an MGU-H, now gone)
     "deploy_taper_kmh": (290.0, 355.0),  # full MGU-K power up to 290 km/h, none at 355
 }
-# Corner-mode trims (ClA, CdA, front balance): estimates, a little less downforce and drag than 2025.
-TRIMS_2026 = {"low": (2.9, 0.78, 0.41), "medium": (3.5, 0.95, 0.42), "high": (4.1, 1.10, 0.43)}
+# Corner-mode trims (ClA, CdA, front balance), calibrated (docs/calibration/2025.md) against the 2026
+# pole laps: ~26 % less downforce than the calibrated 2025 car (the FIA aimed for ~30 %), drag a
+# little lower; straight mode scales them in the aero zones.
+TRIMS_2026 = {"low": (3.09, 1.13, 0.41), "medium": (3.72, 1.38, 0.42), "high": (4.36, 1.60, 0.43)}
+TYRE_GRIP_2026 = 0.94  # narrower tyres (25 mm front, 30 mm rear): grip relative to the 2025 car
 
 
 def f1_2026(fuel_kg: float = 0.0, downforce: str = "medium", **kw) -> CarParams:
@@ -324,6 +335,8 @@ def f1_2026(fuel_kg: float = 0.0, downforce: str = "medium", **kw) -> CarParams:
     c.track_rear = r["max_width_m"] - r["tyre_width_m"][1]
     p.fuel.capacity_kg = r["max_fuel_kg"]
     p.aero.ClA, p.aero.CdA, p.aero.front_balance = TRIMS_2026[downforce]
+    p.tyres.lateral.mu0 *= TYRE_GRIP_2026
+    p.tyres.longitudinal.mu0 *= TYRE_GRIP_2026
     p.aero.active_aero = True
     # Engine: the 2025 curve's shape scaled to a ~400 kW ICE, plus up to 350 kW of MGU-K.
     e, rpm = p.engine, np.asarray(p.engine.rpm_points, float)
