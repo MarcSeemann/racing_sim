@@ -106,7 +106,8 @@ def load(key: str, elevation: bool = True):
 def _drive_one(args):
     run, name, laps = args
     from . import learn
-    cfg = learn.EpisodeConfig(track=name, laps=laps, max_time=learn.default_max_time(name, laps))
+    cfg = learn.EpisodeConfig(track=name, laps=laps, max_time=learn.default_max_time(name, laps),
+                              steer_smoothing=learn.run_steer_smoothing(learn.run_dir(run)))
     _, info = learn.run_episode(learn.load_policy(run), cfg, hidden=learn._run_hidden(learn.run_dir(run)))
     return name, info
 

@@ -288,9 +288,16 @@ class EpisodeConfig:
     ref_speed: float = 15.0  # m/s; reaching the cap slower than this earns no time bonus
     steer_penalty: float = 0.0  # fitness lost per rad the steering travels (sawing at the wheel)
     reversal_penalty: float = 0.0  # fitness lost per change of steering direction (steps > REVERSAL_STEP)
+    # Fitness lost per unit the network's steering command (-1..1) changes between decisions. Unlike the
+    # wheel's travel or reversals (pinned at the actuator's rate limit while the driver saws from lock to
+    # lock), this falls with every bit less sawing, so the training can follow it.
+    command_penalty: float = 0.0
     # Fitness per metre covered, times the average speed / SPEED_BONUS_REF, on runs that do not crash:
     # unlike time_bonus (which saturates), going faster always pays.
     speed_bonus: float = 0.0
+    # The driver's steering command is smoothed: each decision moves it (1 - steer_smoothing) of the way
+    # to the network's output (0 = none; 0.6 = ~50 ms lag). Part of the driver: saved with the run.
+    steer_smoothing: float = 0.0
     # The car and the track (realistic = the same car and conditions as the 3D view).
     realistic: bool = True  # False: the old training car (no fuel, tyres always optimal, no kerbs/grass)
     fuel_kg: float = 40.0
@@ -350,7 +357,13 @@ def controls(act, car, track, i: int) -> Inputs:
     open_ = bool(want and brake < 0.02 and aero_zones(track)[i])
     car.aero_open = open_
     car.bias_dial = float(act[3]) if len(act) > 3 else 0.0
-    return Inputs(throttle=max(pedal, 0.0), brake=brake, steer=float(act[0]) * car.p.chassis.max_steer,
+    steer = float(act[0])
+    k = getattr(car, "steer_smoothing", 0.0)
+    if k:
+        prev = getattr(car, "steer_cmd", None)
+        steer = steer if prev is None else prev + (1.0 - k) * (steer - prev)
+        car.steer_cmd = steer
+    return Inputs(throttle=max(pedal, 0.0), brake=brake, steer=steer * car.p.chassis.max_steer,
                   gear=auto_gear(s, car), drs=open_, brake_bias_delta=BIAS_RANGE * car.bias_dial,
                   ers_mode=min(float(act[4]), 0.0) if len(act) > 4 else 0.0)
 
@@ -366,6 +379,7 @@ def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32,
     policy = Policy(N_OBS, hidden, theta=theta)
     i = track.index_at(cfg.start_s)
     car = make_car(track, cfg, i)
+    car.steer_smoothing = cfg.steer_smoothing
     s = car.state
     s.x, s.y, s.psi = float(track.x[i]), float(track.y[i]), float(track.heading[i])
     car.set_speed(cfg.start_speed)
@@ -378,6 +392,7 @@ def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32,
     slow = 0.0
     steer_travel = 0.0
     reversals, steer_dir = 0, 0.0
+    command_travel, last_cmd = 0.0, None
     limits =cfg.track_limits and car.cond is not None and getattr(track, "_rl", None) is not None
     car.offtrack_time = 0.0
     violations, lap_clean, valid = 0, True, []  # valid[k]: lap k had no track-limits violation
@@ -385,6 +400,9 @@ def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32,
     while s.t < cfg.max_time:
         i = track.nearest(s.x, s.y, i)
         act = policy.act(observe(car, track, i))
+        if last_cmd is not None:
+            command_travel += abs(float(act[0]) - last_cmd)
+        last_cmd = float(act[0])
         steer = float(act[0]) * car.p.chassis.max_steer
         pedal = float(act[1])
         inp = controls(act, car, track, i)
@@ -439,7 +457,8 @@ def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32,
             reason = "lap"
             break
     fitness = (progress + cfg.alive_bonus * s.t - cfg.steer_penalty * steer_travel
-               - cfg.reversal_penalty * reversals - cfg.limits_penalty * violations)
+               - cfg.reversal_penalty * reversals - cfg.command_penalty * command_travel
+               - cfg.limits_penalty * violations)
     crashed = reason in ("off track", "barrier", "disqualified", "stuck")
     if cfg.speed_bonus and not crashed and progress > 0 and s.t > 0:
         fitness += cfg.speed_bonus * progress * (progress / s.t) / SPEED_BONUS_REF
@@ -453,7 +472,7 @@ def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32,
     if clean and cfg.lap_bonus:  # finishing matters most; faster laps score more; deleted laps count for nothing
         fitness += lap_score(clean, cfg.laps, track.length) if len(clean) == len(lap_times) else 1000.0 * len(clean)
     info = {"progress": progress, "laps": lap_times, "reason": reason, "time": s.t, "speed": s.speed,
-            "steer_travel": steer_travel, "reversals": reversals, "track": cfg.track, "violations": violations,
+            "steer_travel": steer_travel, "reversals": reversals, "command_travel": command_travel, "track": cfg.track, "violations": violations,
             "laps_valid": valid}
     return (fitness, info, rows) if record else (fitness, info)
 
@@ -509,6 +528,9 @@ class TrainConfig:
     practice_tracks: tuple = ()
     speed_bonus: float = 0.0  # practice runs: EpisodeConfig.speed_bonus
     reversal_penalty: float = 0.0  # practice runs: EpisodeConfig.reversal_penalty
+    limits_penalty: float = 150.0  # practice runs: EpisodeConfig.limits_penalty (per track-limits violation)
+    command_penalty: float = 0.0  # practice runs: EpisodeConfig.command_penalty
+    steer_smoothing: float = 0.0  # EpisodeConfig.steer_smoothing, in practice and in the tests
 
     @property
     def random(self) -> bool:
@@ -699,7 +721,9 @@ def practice_runs(cfg: TrainConfig, rng, gen: int) -> list:
     common = dict(laps=99, lap_bonus=False, crash_speed_penalty=cfg.crash_speed_penalty,
                   time_bonus=cfg.time_bonus, realistic=ep.realistic, rubber=ep.rubber, phys_dt=ep.phys_dt,
                   downforce=ep.downforce, car=ep.car, steer_penalty=cfg.steer_penalty,
-                  speed_bonus=cfg.speed_bonus, reversal_penalty=cfg.reversal_penalty)
+                  speed_bonus=cfg.speed_bonus, reversal_penalty=cfg.reversal_penalty,
+                  limits_penalty=cfg.limits_penalty, steer_smoothing=cfg.steer_smoothing,
+                  command_penalty=cfg.command_penalty)
     if cfg.random:  # new circuits every generation (seeds >= 1000: never a validation circuit)
         names = list(cfg.practice_tracks)
         for _ in range(max(cfg.tracks_per_gen - len(names), 1)):
@@ -784,6 +808,10 @@ def _test_detail(tests, test_res) -> str:
 def train(cfg: TrainConfig, workers: int = 2, generations: int | None = None, hours: float | None = None,
           log=print, init_from: str | None = None, carry_over: bool = False):
     """Train (or continue training) the driver for cfg's track(s). Ctrl+C stops after saving."""
+    if cfg.episode.steer_smoothing != cfg.steer_smoothing:  # the tests drive like the practice runs
+        cfg = dataclasses.replace(cfg, episode=dataclasses.replace(cfg.episode, steer_smoothing=cfg.steer_smoothing))
+    if not 0.0 <= cfg.steer_smoothing < 1.0:
+        raise ValueError(f"steer_smoothing must be in [0, 1), not {cfg.steer_smoothing}")
     if cfg.select not in ("score", "laps"):
         raise ValueError(f"select must be 'score' or 'laps', not {cfg.select!r}")
     hidden_from_training = [n for n in (*cfg.track_list(), *cfg.validation, *cfg.practice_tracks) if is_calendar(n)]
@@ -923,6 +951,14 @@ def _test_summary(info, laps: int) -> str:
     return txt if len(lt) >= laps else f"{txt} ({info['reason']} at {info['progress']:.0f} m)"
 
 
+def run_steer_smoothing(path: Path) -> float:
+    """The steering smoothing a run's driver was trained with (0 for runs from before it existed)."""
+    try:
+        return float(json.loads((path / "config.json").read_text()).get("steer_smoothing", 0.0))
+    except (ValueError, OSError):
+        return 0.0
+
+
 def _run_hidden(path: Path):
     f = path / "config.json"
     if f.exists():
@@ -952,6 +988,7 @@ class LearnedDriver:
         self.path = run_dir(track_name) / "policy.npy"
         self._mtime = 0.0
         self.hidden = _run_hidden(run_dir(track_name))
+        self.smoothing = run_steer_smoothing(run_dir(track_name))
         self.policy = Policy(N_OBS, self.hidden)
         self._load()
         self.i = 0
@@ -963,6 +1000,7 @@ class LearnedDriver:
             m = self.path.stat().st_mtime
             if m != self._mtime:
                 self.hidden = _run_hidden(self.path.parent)
+                self.smoothing = run_steer_smoothing(self.path.parent)
                 self.policy = Policy(N_OBS, self.hidden, theta=load_policy(self.name))
                 self._mtime = m
                 return True
@@ -976,6 +1014,7 @@ class LearnedDriver:
             self._next_t = s.t + CONTROL_DT
             self.i = self.track.nearest(s.x, s.y, self.i)
             update_offtrack(car, CONTROL_DT)
+            car.steer_smoothing = self.smoothing
             act = self.policy.act(observe(car, self.track, self.i))
             self._inp = controls(act, car, self.track, self.i)
         else:
@@ -1031,6 +1070,14 @@ def main(argv=None):
                    help="practice runs that do not crash: fitness per metre x average speed / 50 m/s")
     t.add_argument("--reversal-penalty", type=float, default=0.0,
                    help="practice fitness lost per change of steering direction (discourages sawing)")
+    t.add_argument("--command-penalty", type=float, default=TrainConfig.command_penalty,
+                   help="practice fitness lost per unit the steering command (-1..1) changes between "
+                        "decisions (discourages sawing from lock to lock)")
+    t.add_argument("--limits-penalty", type=float, default=TrainConfig.limits_penalty,
+                   help="practice fitness lost per track-limits violation (default 150)")
+    t.add_argument("--steer-smoothing", type=float, default=TrainConfig.steer_smoothing,
+                   help="0-0.9: each decision moves the steering command only (1 - x) of the way to the "
+                        "network's output (a smoother driver; saved with the run)")
     pr = sub.add_parser("practice", help="free practice on a circuit, then the test (nothing is saved)")
     pr.add_argument("--policy", "--run", dest="run", required=True, help="the trained driver to start from")
     pr.add_argument("--track", required=True, help="circuit(s), comma-separated, e.g. f1:suzuka,f1:spa")
@@ -1071,7 +1118,8 @@ def main(argv=None):
                           steer_penalty=a.steer_penalty, tracks_per_gen=a.tracks_per_gen,
                           test_laps=a.test_laps, test_every=a.test_every, validation=validation,
                           select=a.select, practice_tracks=practice, speed_bonus=a.speed_bonus,
-                          reversal_penalty=a.reversal_penalty)
+                          reversal_penalty=a.reversal_penalty, limits_penalty=a.limits_penalty,
+                          steer_smoothing=a.steer_smoothing, command_penalty=a.command_penalty)
         what = "new random circuits every generation" if cfg.random else ", ".join(cfg.track_list())
         print(f"training a driver for {what} ({a.laps} laps) with {a.workers} workers; "
               f"checkpoints in {run_dir(cfg.run_name())}/")

@@ -277,3 +277,34 @@ def test_progress_keeps_the_columns_of_a_run_started_earlier(tmp_path, monkeypat
     lines = (d / "progress.csv").read_text().strip().splitlines()
     assert all(ln.count(",") == old_header.count(",") for ln in lines)
     assert str(np.load(d / "checkpoint.npz")["select"]) == "laps"
+
+
+def test_steer_smoothing_calms_a_sawing_driver():
+    pol = Policy(N_OBS).init_random(np.random.default_rng(0))
+    kw = dict(track="short", max_time=4.0, start_speed=20.0)
+    _, raw = run_episode(pol.theta, EpisodeConfig(**kw))
+    _, smooth = run_episode(pol.theta, EpisodeConfig(**kw, steer_smoothing=0.8))
+    assert smooth["steer_travel"] < raw["steer_travel"]
+
+
+def test_steer_smoothing_and_limits_penalty_reach_practice_tests_and_the_saved_run(tmp_path, monkeypatch):
+    from carsim.learn import practice_runs
+    cfg = TrainConfig(track="random", starts=3, steer_smoothing=0.6, limits_penalty=400.0)
+    runs = practice_runs(cfg, np.random.default_rng(0), 0)
+    assert all(r.steer_smoothing == 0.6 and r.limits_penalty == 400.0 for r in runs)
+    monkeypatch.setattr(learn, "RUNS_DIR", tmp_path)
+    cfg = TrainConfig(track="short", population=2, starts=1, laps=1, steer_smoothing=0.6,
+                      episode=EpisodeConfig(track="short", max_time=1.0, laps=1))
+    train(cfg, workers=1, generations=1, log=lambda *a: None)
+    assert learn.run_steer_smoothing(tmp_path / "short") == 0.6
+    assert LearnedDriver(learn.TRACKS["short"](), "short").smoothing == 0.6
+    with pytest.raises(ValueError):
+        train(TrainConfig(track="short", steer_smoothing=1.0), workers=1, generations=1)
+
+
+def test_command_penalty_costs_fitness_per_unit_of_command_change():
+    pol = Policy(N_OBS).init_random(np.random.default_rng(0))
+    kw = dict(track="short", max_time=3.0)
+    f0, info = run_episode(pol.theta, EpisodeConfig(**kw))
+    f1, _ = run_episode(pol.theta, EpisodeConfig(**kw, command_penalty=3.0))
+    assert info["command_travel"] > 0 and f1 == pytest.approx(f0 - 3.0 * info["command_travel"])
