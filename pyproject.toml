@@ -16,6 +16,7 @@ dependencies = ["numpy>=1.24", "scipy>=1.10", "matplotlib>=3.7"]
 play = ["pygame>=2.5"]
 dev = ["pytest>=7"]
 notebooks = ["jupyter>=1.0", "pandas>=2.0"]
+calibration = ["fastf1>=3.9", "pandas>=2.0"]
 
 [tool.setuptools]
 packages = ["carsim"]
