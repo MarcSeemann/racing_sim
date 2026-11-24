@@ -526,7 +526,8 @@ class Car2D:
         drive = [0.0, 0.0, t_axle / 2 - lock, t_axle / 2 + lock]
 
         brake = s.brake
-        bias = min(max(c.brake_front_bias + float(getattr(inp, "brake_bias_delta", 0.0)), 0.3), 0.8)
+        dial = min(max(float(getattr(inp, "brake_bias_delta", 0.0)), -0.1), 0.1)  # the driver's bias dial
+        bias = min(max(c.brake_front_bias + dial, 0.0), 1.0)
         bf = brake * c.max_brake_force * bias * rad / 2
         br = brake * c.max_brake_force * (1 - bias) * rad / 2
         tbrake = [bf, bf, br, br]

@@ -36,7 +36,8 @@ ERGAST = {"melbourne": "albert_park", "shanghai": "shanghai", "suzuka": "suzuka"
           "barcelona": "catalunya", "spielberg": "red_bull_ring", "silverstone": "silverstone", "spa": "spa",
           "hungaroring": "hungaroring", "zandvoort": "zandvoort", "monza": "monza", "madring": "madring",
           "baku": "baku", "singapore": "marina_bay", "austin": "americas", "mexico": "rodriguez",
-          "interlagos": "interlagos", "las_vegas": "vegas", "lusail": "losail", "yas_marina": "yas_marina"}
+          "interlagos": "interlagos", "las_vegas": "vegas", "lusail": "losail", "yas_marina": "yas_marina",
+          "sepang": "sepang"}
 
 
 def _seconds(t: str) -> float:

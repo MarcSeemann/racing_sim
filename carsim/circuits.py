@@ -66,10 +66,11 @@ def monza(elevation: bool = True) -> Track:
     return with_elevation(tr, "monza") if elevation else tr
 
 
-def sepang() -> Track:
+def sepang(elevation: bool = True) -> Track:
     """Sepang International Circuit (5.543 km officially), the F1 layout, from the TUM survey: a
     circuit you may train on, like `monza` (its calendar twin "f1:sepang" stays held out)."""
-    return load_tum_csv(DATA / "sepang.csv", "Sepang")
+    tr = load_tum_csv(DATA / "sepang.csv", "Sepang")
+    return with_elevation(tr, "sepang") if elevation else tr
 
 
 NAMED = {"short": short_circuit, "test": long_circuit, "hill": hill_circuit, "monza": monza, "sepang": sepang}
