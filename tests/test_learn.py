@@ -326,3 +326,13 @@ def test_physics_guide_asks_for_braking_before_monzas_first_chicane():
     assert obs[300.0]["brake_need"] == 0.0  # flat out: nothing to brake for yet
     assert obs[750.0]["brake_need"] > 0.2 and obs[750.0]["target_speed_150"] < -1  # the chicane is coming
     assert len(learn.observe(car, tr, tr.index_at(750.0))) == learn.N_OBS
+
+
+def test_pace_penalty_charges_metres_driven_below_the_guides_speed():
+    pol = Policy(N_OBS).init_random(np.random.default_rng(0))
+    kw = dict(track="short", max_time=3.0)
+    f0, info0 = run_episode(pol.theta, EpisodeConfig(**kw))
+    f1, info = run_episode(pol.theta, EpisodeConfig(**kw, pace_penalty=0.5))
+    assert info0["pace_lag"] == 0.0  # not computed without the penalty
+    assert 0 < info["pace_lag"] <= max(info["progress"], 0) + 1e-9  # at most one metre per metre driven
+    assert f1 == pytest.approx(f0 - 0.5 * info["pace_lag"])

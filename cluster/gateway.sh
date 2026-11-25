@@ -134,7 +134,7 @@ submit)
       --select) need "$f" "$v" '^(score|laps)$' ;;
       --init-from) need "$f" "$v" "$RE_RUN" ;;
       --population|--laps|--starts|--generations|--tracks-per-gen|--test-laps|--test-every) need "$f" "$v" "$RE_INT" ;;
-      --power-share|--fast-corner-share|--steer-penalty|--max-time|--speed-bonus|--reversal-penalty|--limits-penalty|--steer-smoothing|--command-penalty) need "$f" "$v" "$RE_NUM" ;;
+      --power-share|--fast-corner-share|--steer-penalty|--max-time|--speed-bonus|--reversal-penalty|--limits-penalty|--steer-smoothing|--command-penalty|--pace-penalty) need "$f" "$v" "$RE_NUM" ;;
       *) die "flag not allowed: $f" ;;
     esac
     flags+=("$f" "$v"); i=$((i+2))
