@@ -37,9 +37,12 @@ def default_cache_dir() -> Path:
 
 
 def _cache_file(track: Track, margin: float, step: int) -> Path:
-    h = hashlib.sha1(f"v{_CACHE_VERSION}:{margin!r}:{step}".encode())
-    for a in (track.s, track.x, track.y, track.heading, track.width_left, track.width_right):
-        h.update(np.ascontiguousarray(a, dtype=np.float64).tobytes())
+    # Rounded to 0.1 mm / 1e-6 rad: numpy versions build the same track with last-bit differences, and
+    # the 3D view may run under another Python than the one that filled the cache.
+    h = hashlib.sha1(f"v{_CACHE_VERSION}:{margin!r}:{step}:{len(track.s)}".encode())
+    for a in (track.s, track.x, track.y, track.width_left, track.width_right):
+        h.update(np.round(np.asarray(a, dtype=np.float64), 4).tobytes())
+    h.update(np.round(np.asarray(track.heading, dtype=np.float64), 6).tobytes())
     return _DISK_CACHE / f"{h.hexdigest()}.npz"
 
 
