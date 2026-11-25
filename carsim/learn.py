@@ -351,6 +351,11 @@ class EpisodeConfig:
     # can do costs half the distance; where the car must slow down (a chicane) the target is low, so
     # braking there costs nothing. Rewards using the straights, which the progress alone barely does.
     pace_penalty: float = 0.0
+    # Fitness lost per metre driven, per metre the car's centre is beyond EDGE_MARGIN inside the white
+    # line: sum of ds * max(0, edge_beyond + EDGE_MARGIN). A track-limits violation (all four wheels
+    # off) is all or nothing, so a driver cutting a chicane a little less gets no credit for it; this
+    # grows with how deep the cut is, so every bit closer to the line pays.
+    edge_penalty: float = 0.0
     # Fitness per metre covered, times the average speed / SPEED_BONUS_REF, on runs that do not crash:
     # unlike time_bonus (which saturates), going faster always pays.
     speed_bonus: float = 0.0
@@ -430,6 +435,7 @@ def controls(act, car, track, i: int) -> Inputs:
 DSQ_OFFTRACK_S = 3.0  # s with all four wheels beyond the white lines: disqualified
 REVERSAL_STEP = 0.002  # rad per control step: smaller steering moves do not count as a direction change
 SPEED_BONUS_REF = 50.0  # m/s: speed_bonus pays speed_bonus per metre at this average speed
+EDGE_MARGIN = 0.5  # m inside the white line where edge_penalty starts
 
 
 def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32, 32)):
@@ -453,6 +459,7 @@ def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32,
     reversals, steer_dir = 0, 0.0
     command_travel, last_cmd = 0.0, None
     pace_lag = 0.0  # metres-weighted shortfall below the guide's speed (pace_penalty)
+    edge_excess = 0.0  # metre-metres beyond the line's inner margin (edge_penalty)
     guide = guidance(track, car.p) if cfg.pace_penalty else None
     limits =cfg.track_limits and car.cond is not None and getattr(track, "_rl", None) is not None
     car.offtrack_time = 0.0
@@ -489,6 +496,8 @@ def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32,
             ds -= track.length
         if guide is not None and ds > 0:
             pace_lag += ds * max(0.0, 1.0 - s.speed / max(float(guide["v"][i]), 1.0))
+        if cfg.edge_penalty and ds > 0:
+            edge_excess += ds * max(0.0, track.edge_beyond(i, track.cross_track_error(i, s.x, s.y)) + EDGE_MARGIN)
         progress += ds
         last_s = s_now
         if record:
@@ -521,7 +530,7 @@ def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32,
             break
     fitness = (progress + cfg.alive_bonus * s.t - cfg.steer_penalty * steer_travel
                - cfg.reversal_penalty * reversals - cfg.command_penalty * command_travel
-               - cfg.pace_penalty * pace_lag
+               - cfg.pace_penalty * pace_lag - cfg.edge_penalty * edge_excess
                - cfg.limits_penalty * violations)
     crashed = reason in ("off track", "barrier", "disqualified", "stuck")
     if cfg.speed_bonus and not crashed and progress > 0 and s.t > 0:
@@ -536,7 +545,7 @@ def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32,
     if clean and cfg.lap_bonus:  # finishing matters most; faster laps score more; deleted laps count for nothing
         fitness += lap_score(clean, cfg.laps, track.length) if len(clean) == len(lap_times) else 1000.0 * len(clean)
     info = {"progress": progress, "laps": lap_times, "reason": reason, "time": s.t, "speed": s.speed,
-            "steer_travel": steer_travel, "reversals": reversals, "command_travel": command_travel, "pace_lag": pace_lag, "track": cfg.track, "violations": violations,
+            "steer_travel": steer_travel, "reversals": reversals, "command_travel": command_travel, "pace_lag": pace_lag, "edge_excess": edge_excess, "track": cfg.track, "violations": violations,
             "laps_valid": valid}
     return (fitness, info, rows) if record else (fitness, info)
 
@@ -595,6 +604,7 @@ class TrainConfig:
     limits_penalty: float = 150.0  # practice runs: EpisodeConfig.limits_penalty (per track-limits violation)
     command_penalty: float = 0.0  # practice runs: EpisodeConfig.command_penalty
     pace_penalty: float = 0.0  # practice runs: EpisodeConfig.pace_penalty
+    edge_penalty: float = 0.0  # practice runs: EpisodeConfig.edge_penalty
     steer_smoothing: float = 0.0  # EpisodeConfig.steer_smoothing, in practice and in the tests
 
     @property
@@ -788,7 +798,8 @@ def practice_runs(cfg: TrainConfig, rng, gen: int) -> list:
                   downforce=ep.downforce, car=ep.car, steer_penalty=cfg.steer_penalty,
                   speed_bonus=cfg.speed_bonus, reversal_penalty=cfg.reversal_penalty,
                   limits_penalty=cfg.limits_penalty, steer_smoothing=cfg.steer_smoothing,
-                  command_penalty=cfg.command_penalty, pace_penalty=cfg.pace_penalty)
+                  command_penalty=cfg.command_penalty, pace_penalty=cfg.pace_penalty,
+                  edge_penalty=cfg.edge_penalty)
     if cfg.random:  # new circuits every generation (seeds >= 1000: never a validation circuit)
         names = list(cfg.practice_tracks)
         for _ in range(max(cfg.tracks_per_gen - len(names), 1)):
@@ -1141,6 +1152,9 @@ def main(argv=None):
     t.add_argument("--pace-penalty", type=float, default=TrainConfig.pace_penalty,
                    help="practice fitness lost per metre driven below the physics guide's speed, "
                         "weighted by the shortfall (rewards using the straights)")
+    t.add_argument("--edge-penalty", type=float, default=TrainConfig.edge_penalty,
+                   help="practice fitness lost per metre driven per metre the car is beyond "
+                        "0.5 m inside the white line (graded track limits)")
     t.add_argument("--limits-penalty", type=float, default=TrainConfig.limits_penalty,
                    help="practice fitness lost per track-limits violation (default 150)")
     t.add_argument("--steer-smoothing", type=float, default=TrainConfig.steer_smoothing,
@@ -1188,7 +1202,7 @@ def main(argv=None):
                           select=a.select, practice_tracks=practice, speed_bonus=a.speed_bonus,
                           reversal_penalty=a.reversal_penalty, limits_penalty=a.limits_penalty,
                           steer_smoothing=a.steer_smoothing, command_penalty=a.command_penalty,
-                          pace_penalty=a.pace_penalty)
+                          pace_penalty=a.pace_penalty, edge_penalty=a.edge_penalty)
         what = "new random circuits every generation" if cfg.random else ", ".join(cfg.track_list())
         print(f"training a driver for {what} ({a.laps} laps) with {a.workers} workers; "
               f"checkpoints in {run_dir(cfg.run_name())}/")

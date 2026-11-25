@@ -336,3 +336,12 @@ def test_pace_penalty_charges_metres_driven_below_the_guides_speed():
     assert info0["pace_lag"] == 0.0  # not computed without the penalty
     assert 0 < info["pace_lag"] <= max(info["progress"], 0) + 1e-9  # at most one metre per metre driven
     assert f1 == pytest.approx(f0 - 0.5 * info["pace_lag"])
+
+
+def test_edge_penalty_grows_with_how_far_beyond_the_line_the_car_runs():
+    pol = Policy(N_OBS).init_random(np.random.default_rng(1))  # this random driver runs wide
+    kw = dict(track="short", max_time=8.0)
+    f0, info0 = run_episode(pol.theta, EpisodeConfig(**kw))
+    f1, info = run_episode(pol.theta, EpisodeConfig(**kw, edge_penalty=2.0))
+    assert info0["edge_excess"] == 0.0
+    assert info["edge_excess"] > 0.0 and f1 == pytest.approx(f0 - 2.0 * info["edge_excess"])
