@@ -249,6 +249,8 @@ def main(argv=None):
                          "random circuits, or multi_short-test-hill; default: the track's own")
     ap.add_argument("--port", type=int, default=4545)
     a = ap.parse_args(argv)
+    from . import racing_line
+    racing_line.use_disk_cache(racing_line.default_cache_dir())  # solve each circuit's line once, not every start
     serve(Session(a.track, a.weather, a.compound, a.fuel, a.ai, a.learned, a.policy), port=a.port)
 
 

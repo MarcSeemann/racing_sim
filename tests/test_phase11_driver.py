@@ -20,6 +20,22 @@ def line():
 
 
 # ---- racing line ------------------------------------------------------------------
+def test_racing_line_disk_cache_gives_the_same_line_without_solving_again(line, tmp_path, monkeypatch):
+    from carsim import racing_line as rl
+    tr, _, n = line
+    monkeypatch.setattr(rl, "_DISK_CACHE", None)
+    rl.use_disk_cache(tmp_path)
+    try:
+        first = rl.racing_line(short_circuit())[1]  # solved, then written
+        assert len(list(tmp_path.glob("*.npz"))) == 1
+        monkeypatch.setattr(rl, "_solve_lsq", lambda *a: pytest.fail("solved again despite the cache"))
+        second = rl.racing_line(short_circuit())[1]  # read back
+    finally:
+        rl.use_disk_cache(None)
+    np.testing.assert_allclose(first, n)
+    np.testing.assert_array_equal(second, first)
+
+
 def test_racing_line_stays_inside_the_track_and_straightens_corners(line):
     tr, path, n = line
     assert np.abs(n).max() <= tr.width / 2 - 1.5 + 1e-9

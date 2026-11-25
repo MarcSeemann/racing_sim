@@ -9,6 +9,9 @@ bounded linear least-squares problem (scipy lsq_linear).
 A minimum-curvature line is the classic first approximation of the fastest line:
 it straightens corners (outside-apex-outside), so corner speeds go up.
 """
+import hashlib
+from pathlib import Path
+
 import numpy as np
 from scipy.interpolate import CubicSpline
 from scipy.optimize import lsq_linear
@@ -16,9 +19,52 @@ from scipy.sparse import lil_matrix
 
 from .track import Track
 
+# Optional disk cache of the solved line (off by default: training makes thousands of random circuits).
+# The 3D server turns it on, so a circuit's line is solved once (minutes on a 5-km circuit) and then
+# loaded at every start. The key hashes the track's geometry, so a changed track is solved afresh.
+_DISK_CACHE: Path | None = None
+_CACHE_VERSION = 1  # bump when _solve changes
+
+
+def use_disk_cache(path) -> None:
+    """Keep solved racing lines in `path` (None: off)."""
+    global _DISK_CACHE
+    _DISK_CACHE = Path(path) if path else None
+
+
+def default_cache_dir() -> Path:
+    return Path.home() / ".cache" / "carsim" / "racing_lines"
+
+
+def _cache_file(track: Track, margin: float, step: int) -> Path:
+    h = hashlib.sha1(f"v{_CACHE_VERSION}:{margin!r}:{step}".encode())
+    for a in (track.s, track.x, track.y, track.heading, track.width_left, track.width_right):
+        h.update(np.ascontiguousarray(a, dtype=np.float64).tobytes())
+    return _DISK_CACHE / f"{h.hexdigest()}.npz"
+
 
 def _solve(track: Track, margin: float, step: int):
     """The bounded least-squares problem on evenly spaced coarse samples: (idx, offsets there)."""
+    if _DISK_CACHE is None:
+        return _solve_lsq(track, margin, step)
+    f = _cache_file(track, margin, step)
+    try:
+        with np.load(f) as d:
+            return d["idx"], d["n"]
+    except (OSError, KeyError, ValueError):
+        pass
+    idx, n = _solve_lsq(track, margin, step)
+    try:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_suffix(".tmp.npz")
+        np.savez(tmp, idx=idx, n=n)
+        tmp.replace(f)
+    except OSError:
+        pass  # a cache that cannot be written only costs time
+    return idx, n
+
+
+def _solve_lsq(track: Track, margin: float, step: int):
     # Evenly spaced samples all the way round, including the gap that closes the lap
     # (an odd short gap at the start line would put a kink in the line).
     m_pts = max(len(track.s) // step, 8)
