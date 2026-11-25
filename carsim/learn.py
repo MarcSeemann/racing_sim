@@ -937,9 +937,9 @@ def train(cfg: TrainConfig, workers: int = 2, generations: int | None = None, ho
     if not 0.0 <= cfg.assist_pace <= 1.5:
         raise ValueError(f"assist_pace must be in [0, 1.5], not {cfg.assist_pace}")
     src = init_from or cfg.init_from
-    if src and run_assist_pace(run_dir(src)) != cfg.assist_pace:
+    if src and bool(run_assist_pace(run_dir(src))) != bool(cfg.assist_pace):  # another pace is fine: still corrections
         raise ValueError(f"{src} was trained with assist_pace {run_assist_pace(run_dir(src))}, not {cfg.assist_pace}: "
-                         "an assisted driver's outputs are corrections, not controls")
+                         "an assisted driver's outputs are corrections, unassisted ones are controls")
     if not 0.0 <= cfg.steer_smoothing < 1.0:
         raise ValueError(f"steer_smoothing must be in [0, 1), not {cfg.steer_smoothing}")
     if cfg.select not in ("score", "laps"):

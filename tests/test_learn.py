@@ -365,3 +365,6 @@ def test_assist_pace_is_saved_with_the_run_and_a_fresh_assisted_driver_starts_wi
     with pytest.raises(ValueError):  # an unassisted driver's outputs are not corrections
         train(TrainConfig(track="short", name="other", assist_pace=0.0), workers=1, generations=1,
               init_from="short", log=lambda *a: None)
+    train(TrainConfig(track="short", name="faster", population=2, starts=1, laps=1, assist_pace=0.95),
+          workers=1, generations=1, init_from="short", log=lambda *a: None)  # another pace: still corrections
+    assert learn.run_assist_pace(tmp_path / "faster") == 0.95
