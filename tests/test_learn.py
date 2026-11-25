@@ -345,3 +345,23 @@ def test_edge_penalty_grows_with_how_far_beyond_the_line_the_car_runs():
     f1, info = run_episode(pol.theta, EpisodeConfig(**kw, edge_penalty=2.0))
     assert info0["edge_excess"] == 0.0
     assert info["edge_excess"] > 0.0 and f1 == pytest.approx(f0 - 2.0 * info["edge_excess"])
+
+
+def test_assisted_physics_guide_alone_drives_a_clean_lap_of_the_short_circuit():
+    # zero network = no corrections: the physics guide drives on its own
+    th = np.zeros(Policy(N_OBS).size)
+    _, plain = run_episode(th, EpisodeConfig(track="short", laps=1, max_time=120.0))
+    _, info = run_episode(th, EpisodeConfig(track="short", laps=1, max_time=120.0, assist_pace=0.85))
+    assert not plain["laps"]  # without assistance, zero outputs coast to a stop
+    assert len(info["laps"]) == 1 and info["laps_valid"] == [True]
+
+
+def test_assist_pace_is_saved_with_the_run_and_a_fresh_assisted_driver_starts_without_corrections(tmp_path, monkeypatch):
+    monkeypatch.setattr(learn, "RUNS_DIR", tmp_path)
+    cfg = TrainConfig(track="short", population=2, starts=1, laps=1, assist_pace=0.85)
+    train(cfg, workers=1, generations=1, log=lambda *a: None)
+    assert learn.run_assist_pace(tmp_path / "short") == 0.85
+    assert all(r.assist_pace == 0.85 for r in learn.practice_runs(cfg, np.random.default_rng(0), 0))
+    with pytest.raises(ValueError):  # an unassisted driver's outputs are not corrections
+        train(TrainConfig(track="short", name="other", assist_pace=0.0), workers=1, generations=1,
+              init_from="short", log=lambda *a: None)

@@ -362,6 +362,10 @@ class EpisodeConfig:
     # The driver's steering command is smoothed: each decision moves it (1 - steer_smoothing) of the way
     # to the network's output (0 = none; 0.6 = ~50 ms lag). Part of the driver: saved with the run.
     steer_smoothing: float = 0.0
+    # Assisted driving (0 = off): the physics guide drives (pure pursuit of the racing line, the lap
+    # model's speed times assist_pace) and the network only corrects the steering (+-ASSIST_STEER of
+    # full lock) and sets how hard to push (target speed +-ASSIST_PUSH). Part of the driver: saved with the run.
+    assist_pace: float = 0.0
     # The car and the track (realistic = the same car and conditions as the 3D view).
     realistic: bool = True  # False: the old training car (no fuel, tyres always optimal, no kerbs/grass)
     fuel_kg: float = 40.0
@@ -411,17 +415,56 @@ def _start_gear(car, v):
     return best
 
 
+ASSIST_STEER = 0.3  # assisted driving: the network's steering correction, as a share of full lock
+ASSIST_PUSH = 0.15  # assisted driving: the network scales the target speed by up to +-15 %
+
+
+def assist_base(car, track, i: int, push: float = 0.0) -> tuple:
+    """The physics guide as a driver: (steering -1..1, pedal -1..1). Steering: pure pursuit of the
+    racing line, aiming at the point a lookahead distance ahead. Pedal: towards car.assist_pace times
+    (1 + ASSIST_PUSH * push) times the lap model's slowest speed over the next half second (the lap
+    model already brakes for corners). (0, 0) when the circuit has no guide."""
+    g = guidance(track, car.p)
+    if g is None:
+        return 0.0, 0.0
+    s = car.state
+    v, s_i = max(s.speed, 0.0), track.s[i]
+    ld = max(ASSIST_LOOKAHEAD_MIN, ASSIST_LOOKAHEAD_S * v)
+    j = track.index_at(s_i + ld)
+    h = float(track.heading[j])
+    tx = float(track.x[j]) - math.sin(h) * float(g["n"][j])
+    ty = float(track.y[j]) + math.cos(h) * float(g["n"][j])
+    alpha = math.atan2(ty - s.y, tx - s.x) - s.psi
+    alpha = (alpha + math.pi) % (2 * math.pi) - math.pi
+    dist = max(math.hypot(tx - s.x, ty - s.y), 1.0)
+    steer = math.atan(2.0 * car.p.chassis.wheelbase * math.sin(alpha) / dist) / car.p.chassis.max_steer
+    k0, k1 = i, track.index_at(s_i + max(ASSIST_SPEED_AHEAD_S * v, 5.0))
+    vt = g["v"]
+    seg = vt[k0:k1 + 1] if k1 >= k0 else np.concatenate([vt[k0:], vt[:k1 + 1]])
+    v_ref = car.assist_pace * (1.0 + ASSIST_PUSH * push) * float(np.min(seg))
+    pedal = (v_ref - v) * ASSIST_PEDAL_GAIN
+    return max(min(steer, 1.0), -1.0), max(min(pedal, 1.0), -1.0)
+
+
+ASSIST_LOOKAHEAD_MIN, ASSIST_LOOKAHEAD_S = 8.0, 0.3  # m, s: pure-pursuit aim point
+ASSIST_SPEED_AHEAD_S = 0.5  # s of track ahead whose slowest lap-model speed is the target
+ASSIST_PEDAL_GAIN = 0.5  # pedal per m/s below (above) the target
+
+
 def controls(act, car, track, i: int) -> Inputs:
     """The network's outputs (ACTION_NAMES) as the car's inputs. DRS / straight mode only opens in an
     aero zone and closes when the driver brakes; the bias dial moves the brake balance."""
     s = car.state
     pedal = float(act[1])
+    steer = float(act[0])
+    if getattr(car, "assist_pace", 0.0):  # the physics drives; the network corrects the steering and
+        b_steer, pedal = assist_base(car, track, i, push=pedal)  # sets how hard to push (target speed)
+        steer = max(min(b_steer + ASSIST_STEER * steer, 1.0), -1.0)
     brake = max(-pedal, 0.0)
     want = len(act) > 2 and act[2] > 0.0
     open_ = bool(want and brake < 0.02 and aero_zones(track)[i])
     car.aero_open = open_
     car.bias_dial = float(act[3]) if len(act) > 3 else 0.0
-    steer = float(act[0])
     k = getattr(car, "steer_smoothing", 0.0)
     if k:
         prev = getattr(car, "steer_cmd", None)
@@ -445,6 +488,7 @@ def run_episode(theta, cfg: EpisodeConfig, track=None, record=False, hidden=(32,
     i = track.index_at(cfg.start_s)
     car = make_car(track, cfg, i)
     car.steer_smoothing = cfg.steer_smoothing
+    car.assist_pace = cfg.assist_pace
     s = car.state
     s.x, s.y, s.psi = float(track.x[i]), float(track.y[i]), float(track.heading[i])
     car.set_speed(cfg.start_speed)
@@ -606,6 +650,7 @@ class TrainConfig:
     pace_penalty: float = 0.0  # practice runs: EpisodeConfig.pace_penalty
     edge_penalty: float = 0.0  # practice runs: EpisodeConfig.edge_penalty
     steer_smoothing: float = 0.0  # EpisodeConfig.steer_smoothing, in practice and in the tests
+    assist_pace: float = 0.0  # EpisodeConfig.assist_pace, in practice and in the tests
 
     @property
     def random(self) -> bool:
@@ -798,6 +843,7 @@ def practice_runs(cfg: TrainConfig, rng, gen: int) -> list:
                   downforce=ep.downforce, car=ep.car, steer_penalty=cfg.steer_penalty,
                   speed_bonus=cfg.speed_bonus, reversal_penalty=cfg.reversal_penalty,
                   limits_penalty=cfg.limits_penalty, steer_smoothing=cfg.steer_smoothing,
+                  assist_pace=cfg.assist_pace,
                   command_penalty=cfg.command_penalty, pace_penalty=cfg.pace_penalty,
                   edge_penalty=cfg.edge_penalty)
     if cfg.random:  # new circuits every generation (seeds >= 1000: never a validation circuit)
@@ -886,6 +932,14 @@ def train(cfg: TrainConfig, workers: int = 2, generations: int | None = None, ho
     """Train (or continue training) the driver for cfg's track(s). Ctrl+C stops after saving."""
     if cfg.episode.steer_smoothing != cfg.steer_smoothing:  # the tests drive like the practice runs
         cfg = dataclasses.replace(cfg, episode=dataclasses.replace(cfg.episode, steer_smoothing=cfg.steer_smoothing))
+    if cfg.episode.assist_pace != cfg.assist_pace:
+        cfg = dataclasses.replace(cfg, episode=dataclasses.replace(cfg.episode, assist_pace=cfg.assist_pace))
+    if not 0.0 <= cfg.assist_pace <= 1.5:
+        raise ValueError(f"assist_pace must be in [0, 1.5], not {cfg.assist_pace}")
+    src = init_from or cfg.init_from
+    if src and run_assist_pace(run_dir(src)) != cfg.assist_pace:
+        raise ValueError(f"{src} was trained with assist_pace {run_assist_pace(run_dir(src))}, not {cfg.assist_pace}: "
+                         "an assisted driver's outputs are corrections, not controls")
     if not 0.0 <= cfg.steer_smoothing < 1.0:
         raise ValueError(f"steer_smoothing must be in [0, 1), not {cfg.steer_smoothing}")
     if cfg.select not in ("score", "laps"):
@@ -897,6 +951,9 @@ def train(cfg: TrainConfig, workers: int = 2, generations: int | None = None, ho
     out = run_dir(cfg.run_name())
     rng = np.random.default_rng(cfg.seed)
     policy = Policy(N_OBS, cfg.hidden).init_random(rng)
+    if cfg.assist_pace:  # a fresh assisted driver starts as the physics guide alone: no corrections
+        n_last = int(np.prod(policy.shapes[-2])) + int(np.prod(policy.shapes[-1]))
+        policy.theta[-n_last:] = 0.0
     adam = Adam(policy.size, cfg.lr)
     gen, best = _load_start(out, cfg, policy, adam, log, init_from or cfg.init_from, carry_over)
     rng = np.random.default_rng(cfg.seed + gen)
@@ -987,7 +1044,7 @@ def train(cfg: TrainConfig, workers: int = 2, generations: int | None = None, ho
 # ---- practice sessions: learning a circuit before the race -------------------------------------
 def practice_session(theta, track: str, generations: int = 20, population: int = 32, workers: int = 2,
                      hidden=(32, 32), laps: int = 3, starts: int = 4, fast_corner_share: float = 0.25,
-                     steer_penalty: float = 2.0, seed: int = 0, log=print) -> dict:
+                     steer_penalty: float = 2.0, seed: int = 0, log=print, assist_pace: float = 0.0) -> dict:
     """Free practice before the test, like FP1-FP3 at a Grand Prix: a COPY of the driver trains on this
     one circuit for `generations` generations, then drives the `laps`-lap test from the line.
 
@@ -998,7 +1055,9 @@ def practice_session(theta, track: str, generations: int = 20, population: int =
     The test itself never steers the practice (no picking the best practice version by its test)."""
     cfg = TrainConfig(track=track, population=population, laps=laps, starts=starts, hidden=tuple(hidden),
                       fast_corner_share=fast_corner_share, steer_penalty=steer_penalty, seed=seed,
-                      episode=EpisodeConfig(track=track, laps=laps, max_time=default_max_time(track, laps)))
+                      assist_pace=assist_pace,
+                      episode=EpisodeConfig(track=track, laps=laps, max_time=default_max_time(track, laps),
+                                            assist_pace=assist_pace))
     test = test_configs(cfg)[0]
     rng = np.random.default_rng(seed)
     theta = np.asarray(theta, float).copy()
@@ -1025,6 +1084,14 @@ def _test_summary(info, laps: int) -> str:
     lt = info["laps"][:laps]
     txt = " ".join(f"{x:.2f}" for x in lt) or "no lap"
     return txt if len(lt) >= laps else f"{txt} ({info['reason']} at {info['progress']:.0f} m)"
+
+
+def run_assist_pace(path: Path) -> float:
+    """The assist_pace a run's driver was trained with (0: not assisted, also for older runs)."""
+    try:
+        return float(json.loads((path / "config.json").read_text()).get("assist_pace", 0.0))
+    except (ValueError, OSError):
+        return 0.0
 
 
 def run_steer_smoothing(path: Path) -> float:
@@ -1065,6 +1132,7 @@ class LearnedDriver:
         self._mtime = 0.0
         self.hidden = _run_hidden(run_dir(track_name))
         self.smoothing = run_steer_smoothing(run_dir(track_name))
+        self.assist = run_assist_pace(run_dir(track_name))
         self.policy = Policy(N_OBS, self.hidden)
         self._load()
         self.i = 0
@@ -1077,6 +1145,7 @@ class LearnedDriver:
             if m != self._mtime:
                 self.hidden = _run_hidden(self.path.parent)
                 self.smoothing = run_steer_smoothing(self.path.parent)
+                self.assist = run_assist_pace(self.path.parent)
                 self.policy = Policy(N_OBS, self.hidden, theta=load_policy(self.name))
                 self._mtime = m
                 return True
@@ -1091,6 +1160,7 @@ class LearnedDriver:
             self.i = self.track.nearest(s.x, s.y, self.i)
             update_offtrack(car, CONTROL_DT)
             car.steer_smoothing = self.smoothing
+            car.assist_pace = self.assist
             act = self.policy.act(observe(car, self.track, self.i))
             self._inp = controls(act, car, self.track, self.i)
         else:
@@ -1157,6 +1227,12 @@ def main(argv=None):
                         "0.5 m inside the white line (graded track limits)")
     t.add_argument("--limits-penalty", type=float, default=TrainConfig.limits_penalty,
                    help="practice fitness lost per track-limits violation (default 150)")
+    t.add_argument("--seed", type=int, default=TrainConfig.seed,
+                   help="random seed of the training (perturbations, practice circuits): runs that differ "
+                        "only in it show how much of a result is chance")
+    t.add_argument("--assist-pace", type=float, default=TrainConfig.assist_pace,
+                   help="assisted driving: the physics guide drives at this share of the lap model's "
+                        "speed and the network only corrects it (0 = off; try 0.9)")
     t.add_argument("--steer-smoothing", type=float, default=TrainConfig.steer_smoothing,
                    help="0-0.9: each decision moves the steering command only (1 - x) of the way to the "
                         "network's output (a smoother driver; saved with the run)")
@@ -1194,14 +1270,15 @@ def main(argv=None):
         ep = EpisodeConfig(track=a.track, laps=a.laps, max_time=a.max_time or longest,
                            realistic=not a.legacy_car, car=a.car)
         validation = TrainConfig.validation + (("power:0", "power:1") if a.power_share > 0 else ())
-        cfg = TrainConfig(track=tracks[0] if tracks else a.track, tracks=tracks, population=a.population,
+        cfg = TrainConfig(track=tracks[0] if tracks else a.track, tracks=tracks, population=a.population, seed=a.seed,
                           laps=a.laps, starts=a.starts, test_track=a.test_track, episode=ep, name=a.name,
                           power_share=a.power_share, fast_corner_share=a.fast_corner_share,
                           steer_penalty=a.steer_penalty, tracks_per_gen=a.tracks_per_gen,
                           test_laps=a.test_laps, test_every=a.test_every, validation=validation,
                           select=a.select, practice_tracks=practice, speed_bonus=a.speed_bonus,
                           reversal_penalty=a.reversal_penalty, limits_penalty=a.limits_penalty,
-                          steer_smoothing=a.steer_smoothing, command_penalty=a.command_penalty,
+                          steer_smoothing=a.steer_smoothing, assist_pace=a.assist_pace,
+                          command_penalty=a.command_penalty,
                           pace_penalty=a.pace_penalty, edge_penalty=a.edge_penalty)
         what = "new random circuits every generation" if cfg.random else ", ".join(cfg.track_list())
         print(f"training a driver for {what} ({a.laps} laps) with {a.workers} workers; "
@@ -1226,7 +1303,8 @@ def main(argv=None):
         rows = []
         for n in names:
             r = practice_session(theta, n, generations=a.generations, population=a.population,
-                                 workers=a.workers, hidden=hidden, laps=a.laps)
+                                 workers=a.workers, hidden=hidden, laps=a.laps,
+                                 assist_pace=run_assist_pace(run_dir(a.run)))
             rows.append((n, _test_summary(r["before"], a.laps), _test_summary(r["after"], a.laps)))
             print(f"{n}: before practice {rows[-1][1]}  |  after {a.generations} generations {rows[-1][2]}")
         if len(rows) > 1:
@@ -1236,8 +1314,9 @@ def main(argv=None):
     elif a.cmd == "drive":
         if a.track not in TRACKS or a.track == "random":
             ap.error(f"unknown track {a.track!r}")
+        rd = run_dir(a.run or a.track)
         cfg = EpisodeConfig(track=a.track, laps=a.laps, max_time=default_max_time(a.track, a.laps) + 100.0,
-                            car=a.car)
+                            car=a.car, steer_smoothing=run_steer_smoothing(rd), assist_pace=run_assist_pace(rd))
         fit, info = run_episode(load_policy(a.run or a.track), cfg, hidden=_run_hidden(run_dir(a.run or a.track)))
         laps = " ".join(f"{x:.2f}" for x in info["laps"]) or "none"
         tail = "" if len(info["laps"]) >= a.laps else f" ({info['reason']} after {info['progress']:.0f} m)"
