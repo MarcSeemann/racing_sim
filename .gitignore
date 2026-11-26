@@ -11,6 +11,7 @@ venv/
 !tracks/*.csv
 !carsim/data/tracks/*.csv
 !carsim/data/tracks/elevation/*.csv
+!carsim/data/tracks/pitlane/*.csv
 /out/
 *.html
 !docs/**/*.html

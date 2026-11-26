@@ -11,8 +11,9 @@ from carsim.track import Track
 
 def test_street_circuits_have_walls_and_permanent_ones_have_runoff():
     monaco, monza = get_track("f1:monaco"), get_track("f1:monza")
-    assert "f1:monaco" in STREET and np.all(monaco.runoff_left <= 2.0)
-    i = monaco.index_at(500.0)
+    # walls 1.5 m beyond the kerb, or a mapped wall within 12 m of the line (tools/build_runoff.py)
+    assert "f1:monaco" in STREET and np.median(monaco.runoff_left) <= 2.0 and np.all(monaco.runoff_left <= 12.0)
+    i = int(np.flatnonzero((monaco.runoff_left == 1.5) & monaco.kerb_left)[0])
     w = monaco._wl[i] + monaco.kerb_width
     assert monaco.surface_at(w + 1.0, i) == "asphalt" and monaco.surface_at(w + 2.0, i) == "barrier"
     kinds = set(monza.runoff_kind_left) | set(monza.runoff_kind_right)
@@ -45,6 +46,7 @@ def test_off_track_too_long_is_disqualified_and_a_wall_is_a_crash():
     # a huge field of grass: it never reaches a barrier, so it is the 3 s rule that ends the run
     wide = dataclasses.replace(base, runoff_left=np.full(n, 500.0), runoff_right=np.full(n, 500.0),
                                runoff_kind_left=["grass"] * n, runoff_kind_right=["grass"] * n,
+                               surf_left=None, surf_right=None,  # the field above, not the mapped surfaces
                                grade=base.grade, vert_curv=base.vert_curv)
     fit, info = _drift_left(wide)
     assert info["reason"] == "disqualified" and info["violations"] == 1

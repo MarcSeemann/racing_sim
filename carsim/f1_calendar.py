@@ -40,6 +40,7 @@ class Circuit:
     geo: str | None = None  # bacinger/f1-circuits file (circuits/<geo>.geojson)
     width_m: float = 12.0  # "geo" only: nominal width (FIA Grade 1 minimum is 12 m)
     reverse: bool = False  # "geo"/"hybrid": the GeoJSON points run against the race direction
+    start_m: float = 0.0  # "geo"/"hybrid": the start/finish line this far (m) along the GeoJSON trace from its first point
     cancelled: bool = False
 
 
@@ -53,7 +54,8 @@ CALENDAR = (
             cancelled=True),
     Circuit(6, "miami", "Miami International Autodrome", "Miami GP", 5412, "geo", None, "us-2022"),
     Circuit(7, "montreal", "Circuit Gilles-Villeneuve", "Canadian GP", 4361, "tum", "Montreal", "ca-1978"),
-    Circuit(8, "monaco", "Circuit de Monaco", "Monaco GP", 3337, "geo", None, "mc-1929", width_m=9.0),
+    Circuit(8, "monaco", "Circuit de Monaco", "Monaco GP", 3337, "geo", None, "mc-1929", width_m=10.0,
+            start_m=2500.0),  # the trace starts at Casino; the line is on the pit straight, 150 m before Ste Devote
     Circuit(9, "barcelona", "Circuit de Barcelona-Catalunya", "Barcelona-Catalunya GP", 4657, "hybrid",
             "Catalunya", "es-1991"),
     Circuit(10, "spielberg", "Red Bull Ring", "Austrian GP", 4318, "tum", "Spielberg", "at-1969"),

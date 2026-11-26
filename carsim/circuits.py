@@ -44,14 +44,38 @@ def load_tum_csv(path, name: str, ds: float = 1.0) -> Track:
 ELEVATION = DATA / "elevation"  # <key>.csv: s_m, z_m (m above sea level), tools/build_elevation.py
 
 
+# Height difference between the lowest and highest point of the lap (m), as published by
+# Formula1.com ("Highs and lows - which F1 track has the most elevation changes?", 2016). Terrain
+# models see trees and stands, so where our profile's range is more than RANGE_TOL off, the profile
+# is scaled about its mean to this range (its shape kept). Circuits kept flat stay flat.
+PUBLISHED_RANGE_M = {"spa": 102.2, "spielberg": 63.5, "interlagos": 43.0, "suzuka": 40.4, "hungaroring": 34.7,
+                     "austin": 30.9, "barcelona": 29.6, "baku": 26.8, "sepang": 22.0, "bahrain": 16.9,
+                     "monza": 12.8, "silverstone": 11.3, "yas_marina": 10.7, "shanghai": 7.4, "montreal": 5.2,
+                     "melbourne": 2.6}
+RANGE_TOL = 0.10
+
+
+def published_scale(key: str, z: np.ndarray) -> float:
+    """Factor the height profile of `key` is scaled by (1.0: no published figure, flat, or close enough)."""
+    rng = float(z.max() - z.min())
+    pub = PUBLISHED_RANGE_M.get(key)
+    if pub is None or rng < 0.5 or abs(rng / pub - 1) <= RANGE_TOL:
+        return 1.0
+    return pub / rng
+
+
 def with_elevation(track: Track, key: str) -> Track:
     """The track with its surveyed height profile, if there is one (and `altitude_m`, the mean
-    height above sea level, which sets the air pressure). Unchanged if there is no file."""
+    height above sea level, which sets the air pressure). Unchanged if there is no file. The
+    profile is scaled to the published height range where it is known (PUBLISHED_RANGE_M)."""
     f = ELEVATION / f"{key}.csv"
     if not f.exists():
         return track
     d = np.loadtxt(f, delimiter=",", comments="#")
     s_m, z_m = d[:, 0], d[:, 1]
+    k = published_scale(key, z_m)
+    if k != 1.0:
+        z_m = z_m.mean() + (z_m - z_m.mean()) * k
     out = track.with_elevation(lambda s: float(np.interp(s, s_m, z_m, period=track.length)))
     out.altitude_m = float(z_m.mean())
     return out

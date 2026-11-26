@@ -119,6 +119,7 @@ class SurfaceParams:
     gravel_grip: float = 0.45
     gravel_drag: float = 4000.0  # N per wheel in a gravel trap: it is there to stop the car
     gravel_bump: float = 0.02  # m
+    soft_ground_v: float = 15.0  # m/s: grass / gravel drag reaches its full value at this speed
     drain_tau: float = 400.0  # s, standing water drains with this time constant
     evap_mm_h: float = 0.6  # evaporation on a 30 C track with light wind
     line_clear_per_lap: float = 0.25  # share of water a full field clears off its line each lap
@@ -204,17 +205,18 @@ class Conditions:
                             + 0.2 * math.sin(tau * s_wheel / 1.1 + 0.7 * offset))
         if asphalt_only:
             return h
-        a = tr.edge_beyond(i if i is not None else tr.index_at(s_wheel), offset)
+        if i is None:
+            i = tr.index_at(s_wheel)
+        a = tr.edge_beyond(i, offset)
         if a > 0:
-            if a <= tr.kerb_width:
+            kind = tr.surface_at(offset, i)
+            if kind == "kerb":
                 h += sp.kerb_height * math.sin(math.pi * a / tr.kerb_width) * (0.7 + 0.3 * math.sin(tau * s_wheel / sp.kerb_period))
+            elif kind in ("asphalt", "track"):
+                pass  # smooth
             else:
-                kind = tr.surface_at(offset, i if i is not None else tr.index_at(s_wheel))
-                if kind == "asphalt":
-                    pass  # smooth
-                else:
-                    bump = sp.gravel_bump if kind == "gravel" else sp.grass_bump
-                    h += bump * (0.6 * math.sin(tau * s_wheel / 3.7 + offset) + 0.4 * math.sin(tau * s_wheel / 1.3))
+                bump = sp.gravel_bump if kind == "gravel" else sp.grass_bump
+                h += bump * (0.6 * math.sin(tau * s_wheel / 3.7 + offset) + 0.4 * math.sin(tau * s_wheel / 1.3))
         return h
 
     def vertical(self, i: int):

@@ -141,14 +141,25 @@ func _build_track() -> void:
 	for i in n:
 		var dh: float = wrapf(float(hs[(i + 4) % n]) - float(hs[(i - 4 + n) % n]), -PI, PI)
 		corner[i] = abs(dh) / 8.0 > 1.0 / 350.0
+	# Newer servers say where the kerbs are and what lies beyond the lines (run-off surfaces, barriers).
+	var has_surf: bool = track.has("surf_left") and track.has("kerb_left")
+	var kerb_l := []
+	var kerb_r := []
+	kerb_l.resize(n)
+	kerb_r.resize(n)
+	for i in n:
+		kerb_l[i] = (track["kerb_left"] as String)[i] == "1" if has_surf else corner[i]
+		kerb_r[i] = (track["kerb_right"] as String)[i] == "1" if has_surf else corner[i]
 	var bands := [
 		# [from, to, kind]; each end is [side, extra]: side +1 = left edge (offset wl + extra),
 		# -1 = right edge (offset -(wr + extra)).
 		[[-1, 0.0], [1, 0.0], "asphalt"],
 		[[1, 0.0], [1, kerb], "kerb_l"], [[-1, kerb], [-1, 0.0], "kerb_r"],
-		[[1, 0.0], [1, 45.0], "grass"], [[-1, 45.0], [-1, 0.0], "grass"],
 		[[1, -0.35], [1, -0.15], "line"], [[-1, -0.15], [-1, -0.35], "line"],
 	]
+	if not has_surf:
+		bands.append([[1, 0.0], [1, 45.0], "grass"])
+		bands.append([[-1, 45.0], [-1, 0.0], "grass"])
 	asphalt = _mat(Color(0.16, 0.16, 0.17), 0.95)
 	asphalt.metallic_specular = 0.2
 	var grass_mat := _mat(Color(0.12, 0.26, 0.1), 1.0)
@@ -171,7 +182,9 @@ func _build_track() -> void:
 			lift = -0.04
 		for i in n:
 			var j := (i + 1) % n
-			if kind.begins_with("kerb") and not (corner[i] and corner[j]):
+			if kind == "kerb_l" and not (kerb_l[i] and kerb_l[j]):
+				continue
+			if kind == "kerb_r" and not (kerb_r[i] and kerb_r[j]):
 				continue
 			var a0 := _edge(xs, ys, zs, hs, i, _band_offset(band[0], wl, wr, i), lift)
 			var a1 := _edge(xs, ys, zs, hs, i, _band_offset(band[1], wl, wr, i), lift)
@@ -188,6 +201,8 @@ func _build_track() -> void:
 		mi.mesh = st.commit()
 		mi.material_override = kerb_mat if kind.begins_with("kerb") else mats[kind]
 		add_child(mi)
+	if has_surf:
+		_build_runoff(xs, ys, zs, hs, wl, wr, grass_mat)
 	# Start / finish line.
 	var sf := MeshInstance3D.new()
 	var bm := BoxMesh.new()
@@ -228,6 +243,91 @@ func _build_track() -> void:
 	# TV camera spots: every ~250 m, set back from the outside of the track.
 	for i in range(0, n, 250):
 		tv_points.append(_edge(xs, ys, zs, hs, i, -(float(wr[i]) + 25.0), 8.0))
+
+# Run-off beyond the white lines: asphalt, grass and gravel strips as the server maps them, a wall where
+# the barrier starts, and grass behind it. Every RUNOFF_STEP-th sample only: light on a weak laptop.
+const RUNOFF_STEP := 2
+const BEHIND_BARRIER := 25.0  # m of grass drawn behind the barrier
+
+func _runs(code: String) -> Array:
+	# "A4G9g20B27" -> [["A", 0, 4], ["G", 4, 13], ["g", 13, 33], ["B", 33, 60]]
+	var out := []
+	var at := 0
+	var k := 0
+	while k < code.length():
+		var c := code[k]
+		k += 1
+		var num := ""
+		while k < code.length() and code[k] >= "0" and code[k] <= "9":
+			num += code[k]
+			k += 1
+		out.append([c, at, at + int(num)])
+		at += int(num)
+	return out
+
+func _build_runoff(xs: Array, ys: Array, zs: Array, hs: Array, wl: Array, wr: Array, grass_mat: Material) -> void:
+	var n := xs.size()
+	var tools := {"A": SurfaceTool.new(), "G": SurfaceTool.new(), "g": SurfaceTool.new(), "W": SurfaceTool.new()}
+	for t in tools.values():
+		t.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for side in [1, -1]:
+		var surf: Array = track["surf_left"] if side > 0 else track["surf_right"]
+		var w: Array = wl if side > 0 else wr
+		# where the barrier starts at each drawn sample (-1: none within the mapped metres)
+		var bar := {}
+		for i in range(0, n, RUNOFF_STEP):
+			bar[i] = -1.0
+			for r in _runs(surf[i]):
+				if r[0] == "B":
+					bar[i] = float(r[1])
+		for i in range(0, n, RUNOFF_STEP):
+			var j := (i + RUNOFF_STEP) % n
+			if j % RUNOFF_STEP != 0:
+				j = 0
+			if float(bar[i]) >= 0.0 and float(bar[j]) >= 0.0:  # a continuous wall from sample to sample
+				var w0 := _edge(xs, ys, zs, hs, i, side * (float(w[i]) + float(bar[i])), 0.0)
+				var w1 := _edge(xs, ys, zs, hs, j, side * (float(w[j]) + float(bar[j])), 0.0)
+				var up := Vector3(0, 1.0, 0)
+				for v in [w0, w0 + up, w1, w0 + up, w1 + up, w1] if side > 0 else [w0, w1, w0 + up, w0 + up, w1, w1 + up]:
+					tools["W"].add_vertex(v)
+			var runs := _runs(surf[i])
+			var last: Array = runs[runs.size() - 1]
+			if last[0] != "B":  # open ground beyond the mapped metres: grass out to the horizon
+				runs.append(["G", int(last[2]), int(last[2]) + int(BEHIND_BARRIER)])
+			for r in runs:
+				var code: String = r[0]
+				var a: float = float(r[1])
+				var b: float = float(r[2])
+				if code == "B":  # behind the wall (drawn above): grass
+					code = "G"
+					b = a + BEHIND_BARRIER
+				var lift := -0.04 if code == "G" else -0.02
+				var o0 := float(w[i]) + a
+				var o1 := float(w[i]) + b
+				var q0 := float(w[j]) + a
+				var q1 := float(w[j]) + b
+				var a0 := _edge(xs, ys, zs, hs, i, side * o0, lift)
+				var a1 := _edge(xs, ys, zs, hs, i, side * o1, lift)
+				var b0 := _edge(xs, ys, zs, hs, j, side * q0, lift)
+				var b1 := _edge(xs, ys, zs, hs, j, side * q1, lift)
+				var tri := [a0, a1, b0, a1, b1, b0] if side > 0 else [a0, b0, a1, a1, b0, b1]
+				for v in tri:
+					tools[code].add_vertex(v)
+	var runoff_asphalt := _mat(Color(0.21, 0.21, 0.22), 1.0)
+	runoff_asphalt.metallic_specular = 0.05
+	var gravel := _mat(Color(0.40, 0.35, 0.26), 1.0)
+	gravel.metallic_specular = 0.05
+	var wall := _mat(Color(0.30, 0.31, 0.33), 0.9)
+	wall.metallic_specular = 0.1
+	wall.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var mats := {"A": runoff_asphalt, "G": grass_mat, "g": gravel, "W": wall}
+	for code in tools:
+		var st: SurfaceTool = tools[code]
+		st.generate_normals()
+		var mi := MeshInstance3D.new()
+		mi.mesh = st.commit()
+		mi.material_override = mats[code]
+		add_child(mi)
 
 func _band_offset(spec: Array, wl: Array, wr: Array, i: int) -> float:
 	if int(spec[0]) > 0:

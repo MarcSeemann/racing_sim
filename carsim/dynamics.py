@@ -627,7 +627,10 @@ class Car2D:
         f_drag = ar.drag
         f_roll = c.crr * sum(loads) if s.vx > 0.1 else 0.0
         n_grass = surf.count("grass")
-        f_grass = (cond.sp.grass_drag * n_grass + cond.sp.gravel_drag * surf.count("gravel")
+        # Soft ground drags at speed (ploughing, bumps); slowly a car can drive off grass, while a gravel
+        # trap keeps some hold even at a crawl (cars do get beached in it).
+        soft = min(1.0, s.vx / cond.sp.soft_ground_v) if cond is not None else 0.0
+        f_grass = (cond.sp.grass_drag * n_grass * soft + cond.sp.gravel_drag * surf.count("gravel") * max(soft, 0.35)
                    if (cond is not None and s.vx > 0.1) else 0.0)
         plank = 0.0
         if dynamic:
@@ -664,6 +667,10 @@ class Car2D:
         if p.tyre_thermals:
             for i in range(4):
                 wet = cond.sp.water_cooling * depth[i] * math.sqrt(s.speed) if cond is not None else 0.0
+                if cond is not None:
+                    if surf[i] in ("grass", "gravel"):
+                        wet += self.thermal.offtrack_cooling
+                    thermal.roll_surface(self.thermal, s.tyres[i], surf[i], abs(s.speed) * dt)
                 thermal.update(self.thermal, s.tyres[i], p_slide[i], loads[i], s.speed,
                                env.air_temp_c, env.track_temp_c, dt, wet)
         if bk.thermal:

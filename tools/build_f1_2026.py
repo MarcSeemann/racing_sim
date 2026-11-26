@@ -10,7 +10,7 @@ Sources (pinned commits, see SOURCES):
 
 Per circuit (carsim.f1_calendar.CALENDAR, field `source`):
   "tum"     the TUM file copied unchanged (its layout matches the current one: checked below)
-  "geo"     the GeoJSON line -> local metres -> periodic cubic spline through the points ->
+  "geo"     the GeoJSON line -> local metres (from the start line: `start_m` along the trace) -> periodic cubic spline through the points ->
             Gaussian smoothing (sigma 2 m) -> a point every 5 m, constant nominal width.
             Tested on the 12 circuits both sources have: with these settings the GeoJSON
             version's lap time (quasi-steady estimate) is within ~3 % of the surveyed one, on average unbiased.
@@ -203,8 +203,10 @@ def header(c, note):
     return "\n".join(lines)
 
 
-def build(src: Path, check: bool):
+def build(src: Path, check: bool, only=None):
     for c in CALENDAR:
+        if only and c.key not in only:
+            continue
         out = DATA / f"{c.key}.csv"
         if c.key == "monza":
             print(f"{c.key:12s} tum     kept: monza.csv (the existing file, unchanged)")
@@ -218,6 +220,7 @@ def build(src: Path, check: bool):
             L = arc(d[:, :2])[-1]
         else:
             G = geo_line(src / "geo" / f"{c.geo}.geojson", c.reverse)
+            G = np.roll(G, -int(round(c.start_m)), axis=0)  # 1 m points: start on the real line
             if c.source == "geo":
                 P, wr, wl = resample(G, OUT_DS)[0], None, None
                 wr = wl = np.full(len(P), c.width_m / 2)
@@ -240,10 +243,11 @@ def main():
     ap.add_argument("--sources", type=Path, required=True, help="directory with tum/*.csv and geo/*.geojson")
     ap.add_argument("--download", action="store_true", help="fetch the pinned source files first")
     ap.add_argument("--check", action="store_true", help="report only, do not write the circuit files")
+    ap.add_argument("--only", help="comma-separated circuit keys")
     a = ap.parse_args()
     if a.download:
         download(a.sources)
-    build(a.sources, a.check)
+    build(a.sources, a.check, a.only.split(",") if a.only else None)
 
 
 if __name__ == "__main__":

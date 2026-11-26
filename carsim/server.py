@@ -29,7 +29,7 @@ from .conditions import Conditions, Weather
 from .drivers import LapDriver
 from .dynamics import Car2D
 from .inputs import DeviceState, HumanDriver
-from .circuits import TRACKS, track_arg
+from .circuits import TRACKS, get_track, track_arg
 from .params import race_car
 
 DT = 0.001
@@ -37,6 +37,27 @@ SEND_HZ = 60.0
 WEATHER = {"dry": lambda: Weather.dry(),
            "shower": lambda: Weather.shower(start=60, peak=180, end=360, rain_mm_h=8.0),
            "wet": lambda: Weather.constant(rain_mm_h=6.0, cloud=1.0, air_temp_c=16.0)}
+
+
+def _rle(row) -> str:
+    """Surface codes beyond the white line as runs: "A4G9g20B27" = 4 m asphalt, 9 m grass, 20 m gravel, barrier."""
+    out, prev, n = [], None, 0
+    for c in row:
+        if c != prev and n:
+            out.append(f"{'AGgB'[prev]}{n}")
+            n = 0
+        prev, n = c, n + 1
+    out.append(f"{'AGgB'[prev]}{n}")
+    return "".join(out)
+
+
+def surface_message(tr) -> dict:
+    """Kerb flags and run-off surfaces for the 3D view (empty for a track without them)."""
+    if tr.surf_left is None or tr.kerb_left is None:
+        return {}
+    return {"kerb_left": "".join("1" if k else "0" for k in tr.kerb_left),
+            "kerb_right": "".join("1" if k else "0" for k in tr.kerb_right),
+            "surf_left": [_rle(r) for r in tr.surf_left], "surf_right": [_rle(r) for r in tr.surf_right]}
 
 
 class Session:
@@ -47,7 +68,7 @@ class Session:
         self.track_name = track
         self.policy_name = policy or track  # whose trained driver: its training run (e.g. "random")
         self.learned = learned  # drive with the self-taught network (carsim.learn) instead of LapDriver
-        self.track = TRACKS[track]()
+        self.track = get_track(track)  # with run-off and barriers, as in training (TRACKS gives named circuits without)
         self.weather_name, self.compound, self.fuel, self.ai = weather, compound, fuel, ai
         self.ai_driver = LapDriver(self.track, line="racing")  # also gives the racing line to draw
         self.device = DeviceState()
@@ -117,7 +138,7 @@ class Session:
                 "wheelbase": self.car.p.chassis.wheelbase, "track_front": self.car.p.chassis.track_front,
                 "track_rear": self.car.p.chassis.track_rear, "wheel_radius": self.car.p.chassis.wheel_radius,
                 "a": self.car.a, "b": self.car.b, "compound": self.compound, "weather": self.weather_name,
-                "ai": self.ai or self.learned, "learned": self.learned}
+                "ai": self.ai or self.learned, "learned": self.learned, **surface_message(tr)}
 
     def state_message(self) -> dict:
         s, row, c, tr = self.car.state, self.row or {}, self.car.p.chassis, self.track

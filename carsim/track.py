@@ -17,6 +17,9 @@ from dataclasses import dataclass
 import numpy as np
 
 
+SURFACES = ("asphalt", "grass", "gravel", "barrier")  # codes of Track.surf_left / surf_right
+
+
 @dataclass
 class Track:
     name: str
@@ -39,6 +42,13 @@ class Track:
     runoff_right: np.ndarray | None = None
     runoff_kind_left: list | None = None
     runoff_kind_right: list | None = None
+    # Finer surface data (carsim.runoff): where the kerbs are (bool per sample; None = kerbs all the
+    # way round), and what lies beyond the white line metre by metre (uint8 codes of SURFACES, shape
+    # (samples, metres); the last metre repeats outwards). Without them: runoff_* above.
+    kerb_left: np.ndarray | None = None
+    kerb_right: np.ndarray | None = None
+    surf_left: np.ndarray | None = None
+    surf_right: np.ndarray | None = None
 
     def __post_init__(self):
         if self.z is None:
@@ -63,6 +73,9 @@ class Track:
         self._wr = [float(v) for v in self.width_right]
         self._rl = None if self.runoff_left is None else [float(v) for v in self.runoff_left]
         self._rr = None if self.runoff_right is None else [float(v) for v in self.runoff_right]
+        self._kl = None if self.kerb_left is None else [bool(v) for v in self.kerb_left]
+        self._kr = None if self.kerb_right is None else [bool(v) for v in self.kerb_right]
+        self._prof = self.surf_left is not None and self.surf_right is not None
 
     def _derive_vertical(self):
         ds = np.gradient(self.s)
@@ -84,7 +97,9 @@ class Track:
                      self.length, self.width, z, kerb_width=self.kerb_width,
                      width_left=self.width_left, width_right=self.width_right,
                      runoff_left=self.runoff_left, runoff_right=self.runoff_right,
-                     runoff_kind_left=self.runoff_kind_left, runoff_kind_right=self.runoff_kind_right)
+                     runoff_kind_left=self.runoff_kind_left, runoff_kind_right=self.runoff_kind_right,
+                     kerb_left=self.kerb_left, kerb_right=self.kerb_right,
+                     surf_left=self.surf_left, surf_right=self.surf_right)
 
     @classmethod
     def from_points(cls, name: str, x, y, z=None, width: float = 12.0, ds: float = 1.0, smooth: int = 7,
@@ -208,8 +223,15 @@ class Track:
         out = self.edge_beyond(i, offset) if i is not None else abs(offset) - self.width / 2
         if out <= 0:
             return "track"
-        if out <= self.kerb_width:
+        if i is not None and self._kl is not None:
+            if out <= self.kerb_width and (self._kl[i] if offset >= 0 else self._kr[i]):
+                return "kerb"
+        elif out <= self.kerb_width:
             return "kerb"
+        if self._prof and i is not None:
+            prof = self.surf_left if offset >= 0 else self.surf_right
+            j = int(out)
+            return SURFACES[prof[i, j if j < prof.shape[1] else -1]]
         if self._rl is None or i is None:
             return "grass"
         room = self._rl[i] if offset >= 0 else self._rr[i]

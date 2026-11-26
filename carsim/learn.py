@@ -79,7 +79,8 @@ RUNS_DIR = Path(os.environ.get("CARSIM_RUNS", "ai_runs"))
 # Bumped whenever the car's physics changes enough that old drivers/scores are not comparable:
 # a saved run with another version is archived (see _load_start). 2 = phase 13 limits, 3 = phase 14
 # suspension, kerbs, camber, LSD, ERS.
-PHYSICS_VERSION = 5  # 4 = run-off, barriers, track limits; 5 = car calibrated to the 2025 poles (aero, tyres)
+PHYSICS_VERSION = 6  # 4 = run-off, barriers, track limits; 5 = car calibrated to the 2025 poles (aero, tyres);
+# 6 = kerbs only in corners, mapped run-off surfaces, dirty tyres, published elevation ranges
 RUBBER_LINE_STEP = 16  # racing-line resolution (samples) used to place the rubber in training
 
 # Observation layout, by name: a checkpoint saved with an older layout is mapped onto this one
