@@ -174,6 +174,7 @@ def refine(A, R, t, raceway_pts):
     if len(raceway_pts) < 50:
         return R, t, np.nan, np.nan
     tree = cKDTree(raceway_pts)
+    R0, t0 = R, t
     d0 = np.median(tree.query(A @ R.T + t)[0])
     for _ in range(30):
         P = A @ R.T + t
@@ -188,6 +189,8 @@ def refine(A, R, t, raceway_pts):
         R2 = Vt.T @ D @ U.T
         R, t = R2, cb - ca @ R2.T
     d1 = np.median(tree.query(A @ R.T + t)[0])
+    if d1 >= d0:  # pulled towards a pit lane or another layout: keep the trace's fit
+        return R0, t0, float(d0), float(d0)
     return R, t, float(d0), float(d1)
 
 
