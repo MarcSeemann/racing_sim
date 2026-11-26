@@ -119,6 +119,7 @@ class SurfaceParams:
     gravel_grip: float = 0.45
     gravel_drag: float = 4000.0  # N per wheel in a gravel trap: it is there to stop the car
     gravel_bump: float = 0.02  # m
+    soft_ground_v: float = 15.0  # m/s: grass / gravel drag reaches its full value at this speed
     drain_tau: float = 400.0  # s, standing water drains with this time constant
     evap_mm_h: float = 0.6  # evaporation on a 30 C track with light wind
     line_clear_per_lap: float = 0.25  # share of water a full field clears off its line each lap

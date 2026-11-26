@@ -627,7 +627,10 @@ class Car2D:
         f_drag = ar.drag
         f_roll = c.crr * sum(loads) if s.vx > 0.1 else 0.0
         n_grass = surf.count("grass")
-        f_grass = (cond.sp.grass_drag * n_grass + cond.sp.gravel_drag * surf.count("gravel")
+        # Soft ground drags at speed (ploughing, bumps); slowly a car can drive off grass, while a gravel
+        # trap keeps some hold even at a crawl (cars do get beached in it).
+        soft = min(1.0, s.vx / cond.sp.soft_ground_v) if cond is not None else 0.0
+        f_grass = (cond.sp.grass_drag * n_grass * soft + cond.sp.gravel_drag * surf.count("gravel") * max(soft, 0.35)
                    if (cond is not None and s.vx > 0.1) else 0.0)
         plank = 0.0
         if dynamic:
