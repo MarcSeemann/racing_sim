@@ -119,7 +119,9 @@ static func _tree_mesh() -> ArrayMesh:
 	st.generate_normals()
 	return st.commit()
 
-static func build_trees(parent: Node3D, t: Dictionary) -> int:
+const TV_CLEAR := 30.0  # m: no trees round the TV camera spots (they would fill the picture)
+
+static func build_trees(parent: Node3D, t: Dictionary, keep_clear: Array = []) -> int:
 	var n: int = t["x"].size()
 	var out := outer(t)
 	var cell := 40.0
@@ -138,6 +140,13 @@ static func build_trees(parent: Node3D, t: Dictionary) -> int:
 			var x: float = float(t["x"][i]) - side * off * sin(h)
 			var y: float = float(t["y"][i]) + side * off * cos(h)
 			if not clear_of_track(g, cell, x, y, TREE_CLEAR):
+				continue
+			var near_cam := false
+			for c in keep_clear:
+				if Vector2(c.x - x, c.z + y).length() < TV_CLEAR:  # Godot (x, z) = sim (x, -y)
+					near_cam = true
+					break
+			if near_cam:
 				continue
 			var sc := rng.randf_range(0.75, 1.35)
 			var b := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(sc, sc * rng.randf_range(0.85, 1.2), sc))

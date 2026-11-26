@@ -366,7 +366,7 @@ func _build_scenery() -> void:
 		return
 	Scenery.build_gantry(self, track)
 	Scenery.build_stands(self, track)
-	var trees := Scenery.build_trees(self, track)
+	var trees := Scenery.build_trees(self, track, tv_points)
 	print("scenery: %d trees" % trees)
 
 # ---- networking -----------------------------------------------------------------------
