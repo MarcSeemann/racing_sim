@@ -63,3 +63,18 @@ The files are a derived database of OpenStreetMap data, © OpenStreetMap contrib
 under the Open Database License 1.0 (https://opendatacommons.org/licenses/odbl/1-0/). They are NOT
 covered by this repository's own licence: they remain under the ODbL, and whoever receives them may
 use, copy and adapt them under its terms (attribution, share-alike for adapted databases).
+
+## Pit lanes (`pitlane/<key>.csv`: columns `s_m`, `offset_m`, `x_m`, `y_m`)
+
+Each real circuit's pit lane, from where it leaves the track to where it joins it again, a point
+every metre: `s_m` along our lap beside it (below 0: before the start line), `offset_m` from our
+centreline (+ left), and the same points in the track frame. The second header line holds the side,
+entry and exit as JSON. Built by `tools/build_pitlanes.py` from the OpenStreetMap answers that
+`tools/build_runoff.py` keeps: `highway=raceway` ways named or tagged as the pit lane (with their
+entry and exit roads), joined the way OSM connects them, placed with the same fit as the run-off.
+Shanghai's pit lane is not named in OSM: there, the unnamed raceway lines beside the start straight.
+Melbourne (Albert Park, public roads) has no raceway mapped: `carsim/pitlane.py` estimates one there,
+as for every generated track. Nothing drives in them yet (meant for races: pit stops).
+
+Like the run-off files, these are a derived database of OpenStreetMap data, © OpenStreetMap
+contributors, under the Open Database License 1.0 (same terms as above).
