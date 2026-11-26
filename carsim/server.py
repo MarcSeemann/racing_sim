@@ -29,7 +29,7 @@ from .conditions import Conditions, Weather
 from .drivers import LapDriver
 from .dynamics import Car2D
 from .inputs import DeviceState, HumanDriver
-from .circuits import TRACKS, track_arg
+from .circuits import TRACKS, get_track, track_arg
 from .params import race_car
 
 DT = 0.001
@@ -68,7 +68,7 @@ class Session:
         self.track_name = track
         self.policy_name = policy or track  # whose trained driver: its training run (e.g. "random")
         self.learned = learned  # drive with the self-taught network (carsim.learn) instead of LapDriver
-        self.track = TRACKS[track]()
+        self.track = get_track(track)  # with run-off and barriers, as in training (TRACKS gives named circuits without)
         self.weather_name, self.compound, self.fuel, self.ai = weather, compound, fuel, ai
         self.ai_driver = LapDriver(self.track, line="racing")  # also gives the racing line to draw
         self.device = DeviceState()
