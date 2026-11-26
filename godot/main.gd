@@ -273,8 +273,23 @@ func _build_runoff(xs: Array, ys: Array, zs: Array, hs: Array, wl: Array, wr: Ar
 	for side in [1, -1]:
 		var surf: Array = track["surf_left"] if side > 0 else track["surf_right"]
 		var w: Array = wl if side > 0 else wr
+		# where the barrier starts at each drawn sample (-1: none within the mapped metres)
+		var bar := {}
+		for i in range(0, n, RUNOFF_STEP):
+			bar[i] = -1.0
+			for r in _runs(surf[i]):
+				if r[0] == "B":
+					bar[i] = float(r[1])
 		for i in range(0, n, RUNOFF_STEP):
 			var j := (i + RUNOFF_STEP) % n
+			if j % RUNOFF_STEP != 0:
+				j = 0
+			if float(bar[i]) >= 0.0 and float(bar[j]) >= 0.0:  # a continuous wall from sample to sample
+				var w0 := _edge(xs, ys, zs, hs, i, side * (float(w[i]) + float(bar[i])), 0.0)
+				var w1 := _edge(xs, ys, zs, hs, j, side * (float(w[j]) + float(bar[j])), 0.0)
+				var up := Vector3(0, 1.0, 0)
+				for v in [w0, w0 + up, w1, w0 + up, w1 + up, w1] if side > 0 else [w0, w1, w0 + up, w0 + up, w1, w1 + up]:
+					tools["W"].add_vertex(v)
 			var runs := _runs(surf[i])
 			var last: Array = runs[runs.size() - 1]
 			if last[0] != "B":  # open ground beyond the mapped metres: grass out to the horizon
@@ -283,13 +298,7 @@ func _build_runoff(xs: Array, ys: Array, zs: Array, hs: Array, wl: Array, wr: Ar
 				var code: String = r[0]
 				var a: float = float(r[1])
 				var b: float = float(r[2])
-				if code == "B":
-					# the wall at the start of the barrier zone, grass behind it
-					var p0 := _edge(xs, ys, zs, hs, i, side * (float(w[i]) + a), 0.0)
-					var p1 := _edge(xs, ys, zs, hs, j, side * (float(w[j]) + a), 0.0)
-					var up := Vector3(0, 1.0, 0)
-					for v in [p0, p0 + up, p1, p0 + up, p1 + up, p1] if side > 0 else [p0, p1, p0 + up, p0 + up, p1, p1 + up]:
-						tools["W"].add_vertex(v)
+				if code == "B":  # behind the wall (drawn above): grass
 					code = "G"
 					b = a + BEHIND_BARRIER
 				var lift := -0.04 if code == "G" else -0.02

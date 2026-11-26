@@ -46,6 +46,7 @@ UA = {"User-Agent": "carsim-track-builder/0.1"}
 PROFILE_M = runoff.PROFILE_M
 GAP_M = 3  # m of unmapped ground before a mapped surface still counts as that surface
 MIN_BARRIER_M = 2.0  # m beyond the line: a barrier line closer than this is a fitting error (permanent circuits)
+STREET_MAX_M = 12.0  # m: street circuits use a mapped barrier this close at most, else the default wall
 SMOOTH_M = 9  # samples (m) of the running mode along the lap
 SNAP_M = 25.0  # m: raceway points this close to our centreline refine the fit
 OUT = runoff.DATA
@@ -267,10 +268,10 @@ def profiles(track, shapes_track, street: bool):
                         last = row[q]
             else:
                 row[:] = ASPHALT if street else GRASS  # nothing mapped before the barrier
+            if street and not (bar[i] <= STREET_MAX_M):  # a street circuit is lined with walls: a far-off
+                bar[i] = track.kerb_width + runoff.WALL_M  # mapped line (a park fence) is not its barrier
             if np.isfinite(bar[i]):
                 row[int(bar[i]):] = BARRIER
-            elif street:
-                row[int(track.kerb_width + runoff.WALL_M):] = BARRIER
             prof[i] = row
         out.append(_mode(prof, SMOOTH_M))
         mapped.append(float(has.mean()))
