@@ -3,6 +3,7 @@
     python drive3d.py                                   # test circuit, dry, you drive
     python drive3d.py --track hill --weather shower --compound intermediate
     python drive3d.py --ai                              # watch the AI drive the racing line
+    CARSIM_GFX=low python drive3d.py ...                # no trees / grandstands (a slow laptop)
 
 Needs Godot 4.3 or newer (https://godotengine.org/download). Put it on your PATH as `godot`,
 or point the GODOT environment variable at the executable. Without Godot, the server still
