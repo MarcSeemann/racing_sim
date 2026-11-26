@@ -10,6 +10,9 @@ extends Node3D
 
 const HOST := "127.0.0.1"
 const PORT := 4545
+const Scenery = preload("res://scenery.gd")
+# CARSIM_GFX=low: no trees, grandstands or gantry (for a slow laptop); the track and car stay the same.
+var gfx_low := OS.get_environment("CARSIM_GFX") == "low"
 
 var peer := StreamPeerTCP.new()
 var buf := ""
@@ -273,6 +276,8 @@ func _build_runoff(xs: Array, ys: Array, zs: Array, hs: Array, wl: Array, wr: Ar
 	for side in [1, -1]:
 		var surf: Array = track["surf_left"] if side > 0 else track["surf_right"]
 		var w: Array = wl if side > 0 else wr
+		var has_kerbs: bool = track.has("kerb_left")
+		var kflags = track["kerb_left"] if side > 0 and has_kerbs else (track["kerb_right"] if has_kerbs else "")
 		# where the barrier starts at each drawn sample (-1: none within the mapped metres)
 		var bar := {}
 		for i in range(0, n, RUNOFF_STEP):
@@ -284,6 +289,11 @@ func _build_runoff(xs: Array, ys: Array, zs: Array, hs: Array, wl: Array, wr: Ar
 			var j := (i + RUNOFF_STEP) % n
 			if j % RUNOFF_STEP != 0:
 				j = 0
+			var kerb_here: bool = has_kerbs and (kflags as String)[i] == "1"
+			if kerb_here:  # tyre walls in the corners: red and white
+				tools["W"].set_color(Color(0.62, 0.07, 0.07) if (i / (RUNOFF_STEP * 2)) % 2 == 0 else Color(0.82, 0.82, 0.82))
+			else:  # concrete along the straights
+				tools["W"].set_color(Color(0.33, 0.34, 0.36))
 			if float(bar[i]) >= 0.0 and float(bar[j]) >= 0.0:  # a continuous wall from sample to sample
 				var w0 := _edge(xs, ys, zs, hs, i, side * (float(w[i]) + float(bar[i])), 0.0)
 				var w1 := _edge(xs, ys, zs, hs, j, side * (float(w[j]) + float(bar[j])), 0.0)
@@ -302,6 +312,8 @@ func _build_runoff(xs: Array, ys: Array, zs: Array, hs: Array, wl: Array, wr: Ar
 					code = "G"
 					b = a + BEHIND_BARRIER
 				var lift := -0.04 if code == "G" else -0.02
+				if code == "G":  # mowed stripes, 12 m wide
+					tools["G"].set_color(Color(0.12, 0.26, 0.10) if (i / 12) % 2 == 0 else Color(0.14, 0.30, 0.115))
 				var o0 := float(w[i]) + a
 				var o1 := float(w[i]) + b
 				var q0 := float(w[j]) + a
@@ -317,10 +329,10 @@ func _build_runoff(xs: Array, ys: Array, zs: Array, hs: Array, wl: Array, wr: Ar
 	runoff_asphalt.metallic_specular = 0.05
 	var gravel := _mat(Color(0.40, 0.35, 0.26), 1.0)
 	gravel.metallic_specular = 0.05
-	var wall := _mat(Color(0.30, 0.31, 0.33), 0.9)
-	wall.metallic_specular = 0.1
+	var wall := Scenery.vmat(0.9)
+	var grass_striped := Scenery.vmat(1.0)
 	wall.cull_mode = BaseMaterial3D.CULL_DISABLED
-	var mats := {"A": runoff_asphalt, "G": grass_mat, "g": gravel, "W": wall}
+	var mats := {"A": runoff_asphalt, "G": grass_striped, "g": gravel, "W": wall}
 	for code in tools:
 		var st: SurfaceTool = tools[code]
 		st.generate_normals()
@@ -346,67 +358,16 @@ func _build_car() -> void:
 	add_child(car_root)
 	body = Node3D.new()
 	car_root.add_child(body)
-	var a: float = track["a"]
-	var b: float = track["b"]
-	var tf: float = track["track_front"]
-	var trr: float = track["track_rear"]
-	var r: float = track["wheel_radius"]
-	var paint := _mat(Color(0.72, 0.05, 0.04), 0.35, 0.3)
-	var dark := _mat(Color(0.08, 0.08, 0.09), 0.5)
-	# Forward is -Z. Parts: [size, position, material]
-	var parts := [
-		[Vector3(0.55, 0.38, 2.6), Vector3(0, 0.42, -0.6), paint],          # nose and monocoque
-		[Vector3(0.3, 0.22, 1.2), Vector3(0, 0.33, -a - 0.2), paint],        # nose tip
-		[Vector3(1.6, 0.38, 1.8), Vector3(0, 0.36, 0.5), paint],             # sidepods
-		[Vector3(0.7, 0.55, 1.6), Vector3(0, 0.62, 1.0), paint],             # engine cover
-		[Vector3(1.9, 0.05, 0.55), Vector3(0, 0.14, -a - 0.55), dark],       # front wing
-		[Vector3(1.0, 0.06, 0.35), Vector3(0, 1.0, b + 0.45), dark],         # rear wing
-		[Vector3(0.05, 0.5, 0.4), Vector3(0.5, 0.78, b + 0.45), dark],       # rear wing endplates
-		[Vector3(0.05, 0.5, 0.4), Vector3(-0.5, 0.78, b + 0.45), dark],
-		[Vector3(1.3, 0.04, 3.6), Vector3(0, 0.08, 0.1), dark],              # floor
-	]
-	for p in parts:
-		var mi := MeshInstance3D.new()
-		var bm := BoxMesh.new()
-		bm.size = p[0]
-		mi.mesh = bm
-		mi.material_override = p[2]
-		mi.position = p[1]
-		body.add_child(mi)
-	var helmet := MeshInstance3D.new()
-	var sm := SphereMesh.new()
-	sm.radius = 0.15
-	sm.height = 0.3
-	helmet.mesh = sm
-	helmet.material_override = _mat(Color(0.95, 0.85, 0.1), 0.3)
-	helmet.position = Vector3(0, 0.78, -0.1)
-	body.add_child(helmet)
-	# Wheels: a steer pivot (front only turns) holding a spinning tyre with a visible spoke.
-	var tyre_mat := _mat(Color(0.06, 0.06, 0.06), 0.9)
-	var rim_mat := _mat(Color(0.75, 0.75, 0.78), 0.3, 0.8)
-	var spots := [Vector3(-tf / 2, r, -a), Vector3(tf / 2, r, -a), Vector3(-trr / 2, r, b), Vector3(trr / 2, r, b)]
-	for k in 4:
-		var pivot := Node3D.new()
-		pivot.position = spots[k]
-		car_root.add_child(pivot)
-		var spin := Node3D.new()
-		pivot.add_child(spin)
-		var tyre := MeshInstance3D.new()
-		var cm := CylinderMesh.new()
-		cm.top_radius = r
-		cm.bottom_radius = r
-		cm.height = 0.38 if k >= 2 else 0.32
-		tyre.mesh = cm
-		tyre.rotation.z = PI / 2
-		tyre.material_override = tyre_mat
-		spin.add_child(tyre)
-		var spoke := MeshInstance3D.new()
-		var sbm := BoxMesh.new()
-		sbm.size = Vector3(0.4, 0.08, r * 1.5)
-		spoke.mesh = sbm
-		spoke.material_override = rim_mat
-		spin.add_child(spoke)
-		wheels.append([pivot, spin])
+	wheels = Scenery.build_car(car_root, body, track)
+
+func _build_scenery() -> void:
+	Scenery.build_rubber(self, track)
+	if gfx_low:
+		return
+	Scenery.build_gantry(self, track)
+	Scenery.build_stands(self, track)
+	var trees := Scenery.build_trees(self, track, tv_points)
+	print("scenery: %d trees" % trees)
 
 # ---- networking -----------------------------------------------------------------------
 func _process(delta: float) -> void:
@@ -432,6 +393,7 @@ func _process(delta: float) -> void:
 					track = msg
 					_build_track()
 					_build_car()
+					_build_scenery()
 					_set_status("")
 				elif msg["type"] == "state":
 					latest = msg
