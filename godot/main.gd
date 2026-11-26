@@ -315,7 +315,7 @@ func _build_runoff(xs: Array, ys: Array, zs: Array, hs: Array, wl: Array, wr: Ar
 					tools[code].add_vertex(v)
 	var runoff_asphalt := _mat(Color(0.21, 0.21, 0.22), 1.0)
 	runoff_asphalt.metallic_specular = 0.05
-	var gravel := _mat(Color(0.50, 0.44, 0.33), 1.0)
+	var gravel := _mat(Color(0.40, 0.35, 0.26), 1.0)
 	gravel.metallic_specular = 0.05
 	var wall := _mat(Color(0.30, 0.31, 0.33), 0.9)
 	wall.metallic_specular = 0.1
