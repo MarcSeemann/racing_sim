@@ -37,9 +37,9 @@ class ThermalParams:
 
     # Off the tarmac: grass and gravel coat the tread (dirt costs grip until it wears off on the asphalt)
     # and the cool, damp ground draws heat out of it.
-    dirt_grip_loss: float = 0.12  # grip lost with a fully dirty tread
+    dirt_grip_loss: float = 0.10  # grip lost with a fully dirty tread
     dirt_pickup_m: float = 4.0  # m rolled on grass/gravel to pick up ~63 % of full dirt
-    dirt_clean_m: float = 600.0  # m on asphalt to shed ~63 % of it
+    dirt_clean_m: float = 250.0  # m on asphalt to shed ~63 % of it (a corner or two)
     offtrack_cooling: float = 40.0  # W/K, extra tread cooling into grass/gravel
 
     pressure_set: float = 1.45  # bar gauge, cold set at blanket temperature
