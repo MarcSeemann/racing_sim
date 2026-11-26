@@ -53,7 +53,7 @@ CALENDAR = (
             cancelled=True),
     Circuit(6, "miami", "Miami International Autodrome", "Miami GP", 5412, "geo", None, "us-2022"),
     Circuit(7, "montreal", "Circuit Gilles-Villeneuve", "Canadian GP", 4361, "tum", "Montreal", "ca-1978"),
-    Circuit(8, "monaco", "Circuit de Monaco", "Monaco GP", 3337, "geo", None, "mc-1929", width_m=9.0),
+    Circuit(8, "monaco", "Circuit de Monaco", "Monaco GP", 3337, "geo", None, "mc-1929", width_m=10.0),
     Circuit(9, "barcelona", "Circuit de Barcelona-Catalunya", "Barcelona-Catalunya GP", 4657, "hybrid",
             "Catalunya", "es-1991"),
     Circuit(10, "spielberg", "Red Bull Ring", "Austrian GP", 4318, "tum", "Spielberg", "at-1969"),

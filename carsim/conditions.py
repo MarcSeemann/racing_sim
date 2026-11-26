@@ -204,17 +204,18 @@ class Conditions:
                             + 0.2 * math.sin(tau * s_wheel / 1.1 + 0.7 * offset))
         if asphalt_only:
             return h
-        a = tr.edge_beyond(i if i is not None else tr.index_at(s_wheel), offset)
+        if i is None:
+            i = tr.index_at(s_wheel)
+        a = tr.edge_beyond(i, offset)
         if a > 0:
-            if a <= tr.kerb_width:
+            kind = tr.surface_at(offset, i)
+            if kind == "kerb":
                 h += sp.kerb_height * math.sin(math.pi * a / tr.kerb_width) * (0.7 + 0.3 * math.sin(tau * s_wheel / sp.kerb_period))
+            elif kind in ("asphalt", "track"):
+                pass  # smooth
             else:
-                kind = tr.surface_at(offset, i if i is not None else tr.index_at(s_wheel))
-                if kind == "asphalt":
-                    pass  # smooth
-                else:
-                    bump = sp.gravel_bump if kind == "gravel" else sp.grass_bump
-                    h += bump * (0.6 * math.sin(tau * s_wheel / 3.7 + offset) + 0.4 * math.sin(tau * s_wheel / 1.3))
+                bump = sp.gravel_bump if kind == "gravel" else sp.grass_bump
+                h += bump * (0.6 * math.sin(tau * s_wheel / 3.7 + offset) + 0.4 * math.sin(tau * s_wheel / 1.3))
         return h
 
     def vertical(self, i: int):

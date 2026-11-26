@@ -45,6 +45,7 @@ def test_off_track_too_long_is_disqualified_and_a_wall_is_a_crash():
     # a huge field of grass: it never reaches a barrier, so it is the 3 s rule that ends the run
     wide = dataclasses.replace(base, runoff_left=np.full(n, 500.0), runoff_right=np.full(n, 500.0),
                                runoff_kind_left=["grass"] * n, runoff_kind_right=["grass"] * n,
+                               surf_left=None, surf_right=None,  # the field above, not the mapped surfaces
                                grade=base.grade, vert_curv=base.vert_curv)
     fit, info = _drift_left(wide)
     assert info["reason"] == "disqualified" and info["violations"] == 1

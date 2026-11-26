@@ -35,6 +35,13 @@ class ThermalParams:
     temp_penalty: float = 0.08  # grip lost at one window-width off the optimum
     surface_weight: float = 0.7  # effective grip temperature = mix of surface and core
 
+    # Off the tarmac: grass and gravel coat the tread (dirt costs grip until it wears off on the asphalt)
+    # and the cool, damp ground draws heat out of it.
+    dirt_grip_loss: float = 0.12  # grip lost with a fully dirty tread
+    dirt_pickup_m: float = 4.0  # m rolled on grass/gravel to pick up ~63 % of full dirt
+    dirt_clean_m: float = 600.0  # m on asphalt to shed ~63 % of it
+    offtrack_cooling: float = 40.0  # W/K, extra tread cooling into grass/gravel
+
     pressure_set: float = 1.45  # bar gauge, cold set at blanket temperature
     pressure_opt: float = 1.60  # bar gauge, hot optimum
     pressure_penalty: float = 2.0
@@ -54,6 +61,7 @@ class TyreThermalState:
     t_core: float
     wear: float = 0.0  # 0 new .. 1 worn through
     p_slide: float = 0.0  # last sliding power, W (for telemetry)
+    dirt: float = 0.0  # 0 clean .. 1 coated with grass/gravel dust
 
     @classmethod
     def from_blankets(cls, tp: ThermalParams):
@@ -75,7 +83,17 @@ def grip_factor(tp: ThermalParams, st: TyreThermalState) -> float:
     g_wear = 1 - tp.wear_grip_loss * min(st.wear, 1.0)
     if st.wear > tp.cliff:
         g_wear -= tp.cliff_loss * (st.wear - tp.cliff)
-    return max(g_temp * g_press * max(g_wear, 0.3), 0.3)
+    g_dirt = 1 - tp.dirt_grip_loss * st.dirt
+    return max(g_temp * g_press * max(g_wear, 0.3) * g_dirt, 0.3)
+
+
+def roll_surface(tp: ThermalParams, st: TyreThermalState, surface: str, ds: float) -> None:
+    """Dirt on the tread after rolling ds metres on `surface`: picked up on grass and gravel, worn off
+    on asphalt (track, kerbs, asphalt run-off)."""
+    if surface in ("grass", "gravel"):
+        st.dirt += (1.0 - st.dirt) * (1.0 - math.exp(-ds / tp.dirt_pickup_m))
+    elif st.dirt > 0.0:
+        st.dirt *= math.exp(-ds / tp.dirt_clean_m)
 
 
 def update(tp: ThermalParams, st: TyreThermalState, p_slide: float, fz: float, v: float,

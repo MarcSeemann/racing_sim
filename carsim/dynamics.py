@@ -664,6 +664,10 @@ class Car2D:
         if p.tyre_thermals:
             for i in range(4):
                 wet = cond.sp.water_cooling * depth[i] * math.sqrt(s.speed) if cond is not None else 0.0
+                if cond is not None:
+                    if surf[i] in ("grass", "gravel"):
+                        wet += self.thermal.offtrack_cooling
+                    thermal.roll_surface(self.thermal, s.tyres[i], surf[i], abs(s.speed) * dt)
                 thermal.update(self.thermal, s.tyres[i], p_slide[i], loads[i], s.speed,
                                env.air_temp_c, env.track_temp_c, dt, wet)
         if bk.thermal:
